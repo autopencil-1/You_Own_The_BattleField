@@ -1,0 +1,13 @@
+**
+!web_decoy_2a/
+!web_decoy_2a/**
+!config/
+!config/exp_2a_pilot.json
+!model_gateway/
+!model_gateway/**
+!agent_runner/
+!agent_runner/**
+web_decoy_2a/__pycache__/
+web_decoy_2a/**/*.pyc
+model_gateway/__pycache__/
+agent_runner/__pycache__/

@@ -1,0 +1,107 @@
+services:
+  web-decoy-2a:
+    image: shape-web-decoy-2a:dev
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: web_decoy_2a/Dockerfile
+    environment:
+      SHAPE_ARM: ${SHAPE_ARM:-C2}
+      SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2a-dev}
+    expose:
+      - "8080"
+    networks:
+      - trial_net
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+
+  model-gateway:
+    profiles: [agent]
+    image: shape-model-gateway:dev
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: model_gateway/Dockerfile
+    user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
+    environment:
+      SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2a-dev}
+      SHAPE_MODEL: glm-5.3-flash
+      SHAPE_MAX_MODEL_CALLS: ${SHAPE_MAX_MODEL_CALLS:-60}
+      SHAPE_MAX_MODEL_TOKENS: ${SHAPE_MAX_MODEL_TOKENS:-200000}
+      SHAPE_KEY_FILE: /run/secrets/zai_api_key
+    volumes:
+      - type: bind
+        source: ${SHAPE_KEY_FILE:-/tmp/shape2a-dev-key}
+        target: /run/secrets/zai_api_key
+        read_only: true
+    expose: ["8081"]
+    networks: [trial_net, egress_net]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+
+  attacker-agent:
+    profiles: [agent]
+    image: shape-pentestgpt-agent:dev
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: agent_runner/Dockerfile
+      additional_contexts:
+        pentest_source: ../PentestGPT/pentestgpt_agent
+    user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
+    environment:
+      SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2a-dev}
+      SHAPE_SMOKE: ${SHAPE_SMOKE:-0}
+      ANTHROPIC_BASE_URL: http://model-gateway:8081
+      ANTHROPIC_AUTH_TOKEN: shape-lab-placeholder
+      ANTHROPIC_CUSTOM_MODEL_OPTION: glm-5.3-flash
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: glm-5.3-flash
+      ANTHROPIC_DEFAULT_SONNET_MODEL: glm-5.3-flash
+      ANTHROPIC_DEFAULT_OPUS_MODEL: glm-5.3-flash
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      CLAUDE_CODE_MAX_RETRIES: "0"
+      DISABLE_AUTOUPDATER: "1"
+      DISABLE_TELEMETRY: "1"
+      DISABLE_ERROR_REPORTING: "1"
+      API_TIMEOUT_MS: "180000"
+    volumes:
+      - type: bind
+        source: ${SHAPE_RUN_DIR:-/tmp/shape2a-dev}/agent
+        target: /work
+    networks: [trial_net]
+    depends_on:
+      web-decoy-2a:
+        condition: service_healthy
+      model-gateway:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2
+    restart: "no"
+
+networks:
+  trial_net:
+    internal: true
+  egress_net: {}
