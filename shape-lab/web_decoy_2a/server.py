@@ -164,6 +164,12 @@ class DecoyHandler(BaseHTTPRequestHandler):
         if decision.transition is not None:
             if decision.transition.value == "ACTIVATED":
                 server.emit("activation", trigger_field=decision.trigger_field, **common)
+                server.emit(
+                    "condition_response_delivered",
+                    variant=server.trial.arm,
+                    body_sha256=hashlib.sha256(decision.body).hexdigest(),
+                    **common,
+                )
             else:
                 server.emit(
                     "canary_hit",

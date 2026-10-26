@@ -22,10 +22,12 @@ LAB = Path(__file__).resolve().parents[1]
 REPO = LAB.parent
 COMPOSE = LAB / "compose.yaml"
 CONFIG = LAB / "config" / "exp_2a_pilot.json"
+AGENT_CONFIG = LAB / "config" / "agent_2a_task.json"
 EXPECTED_PENTESTGPT_COMMIT = "e8b1bb77d1ac00329675cec3b060aba971ec1ac8"
 EXPECTED_UNIFIED_COMMIT = "acff8eeadf93e367d4a1578d3a2739cbc9d3ace5"
 EXPECTED_CLAUDE_CLI_VERSION = "2.1.206"
 CLAUDE_CLI = "/opt/pentestgpt_agent/.venv/lib/python3.12/site-packages/claude_agent_sdk/_bundled/claude"
+AGENT_IMAGE = "shape-2a-attacker:dev"
 
 
 def command(args: list[str], *, env: dict[str, str] | None = None, timeout: int = 600, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -70,6 +72,17 @@ def validate_sources() -> tuple[str, str]:
     return commit, EXPECTED_UNIFIED_COMMIT
 
 
+def validate_agent_config(config: dict[str, Any]) -> None:
+    expected = {
+        "schema_version": config["schema_version"],
+        "agent": {key: config["agent"][key] for key in ("backend", "model", "effort")},
+        "task": config["task"],
+        "caps_per_trial": config["caps_per_trial"],
+    }
+    if json.loads(AGENT_CONFIG.read_text(encoding="utf-8")) != expected:
+        raise ValueError("Arm-blind agent configuration differs from the frozen trial inputs")
+
+
 def count_tool_calls(agent_dir: Path, run_id: str) -> int:
     count = 0
     for path in (agent_dir / "runs" / run_id / "traces").glob("*/events.jsonl"):
@@ -95,6 +108,96 @@ def container_state(project: str, service: str, env: dict[str, str]) -> dict[str
     return json.loads(output.stdout) if output.returncode == 0 else None
 
 
+def container_networks(project: str, service: str, env: dict[str, str]) -> list[str]:
+    identifier = compose(project, ["ps", "-a", "-q", service], env, timeout=30).stdout.strip()
+    if not identifier:
+        raise RuntimeError(f"Missing {service} container")
+    result = command([
+        "docker", "inspect", identifier, "--format", "{{json .NetworkSettings.Networks}}",
+    ], timeout=30)
+    return sorted(json.loads(result.stdout))
+
+
+def container_credentials(project: str, service: str, env: dict[str, str]) -> dict[str, Any]:
+    identifier = compose(project, ["ps", "-a", "-q", service], env, timeout=30).stdout.strip()
+    if not identifier:
+        raise RuntimeError(f"Missing {service} container")
+    inspection = command([
+        "docker", "inspect", identifier,
+        "--format", "{{json .Config.Env}}\n{{json .Mounts}}",
+    ], timeout=30).stdout.splitlines()
+    names = {item.partition("=")[0] for item in json.loads(inspection[0])}
+    mounts = {item["Destination"] for item in json.loads(inspection[1])}
+    return {
+        "real_key_in_environment": "ZAI_API_KEY" in names,
+        "real_key_file_mounted": "/run/secrets/zai_api_key" in mounts,
+        "arm_in_environment": "SHAPE_ARM" in names,
+        "placeholder_auth": any(item == "ANTHROPIC_AUTH_TOKEN=shape-lab-placeholder" for item in json.loads(inspection[0])),
+    }
+
+
+def isolation_preflight(project: str, env: dict[str, str]) -> dict[str, Any]:
+    trial_network = project + "_trial_net"
+    egress_network = project + "_egress_net"
+    networks = {
+        service: container_networks(project, service, env)
+        for service in ("web-decoy-2a", "model-gateway")
+    }
+    if networks["web-decoy-2a"] != [trial_network] or networks["model-gateway"] != sorted([trial_network, egress_network]):
+        raise RuntimeError("Decoy or gateway network topology differs from the trial contract")
+    credentials = {
+        service: container_credentials(project, service, env)
+        for service in ("web-decoy-2a", "model-gateway")
+    }
+    if credentials["web-decoy-2a"] != {
+        "real_key_in_environment": False, "real_key_file_mounted": False,
+        "arm_in_environment": True, "placeholder_auth": False,
+    }:
+        raise RuntimeError("Decoy has access to a model credential")
+    if credentials["model-gateway"] != {
+        "real_key_in_environment": False, "real_key_file_mounted": True,
+        "arm_in_environment": False, "placeholder_auth": False,
+    }:
+        raise RuntimeError("Gateway credential mounting differs from the trial contract")
+    probe = """
+import json, os, shutil, socket, urllib.request
+from pathlib import Path
+task = json.loads(Path("/opt/shape/agent_2a_task.json").read_text())
+result = {
+    "real_key_in_agent_env": bool(os.environ.get("ZAI_API_KEY")),
+    "trigger_data_in_agent_image": bool({"arm", "activation"} & task.keys()) or Path("/opt/shape/exp_2a_pilot.json").exists(),
+    "http_tools_present": bool(shutil.which("curl") and shutil.which("bash")),
+    "build_tools_absent": not shutil.which("git") and not shutil.which("uv"),
+}
+for name, url in (("decoy", "http://web-decoy-2a:8080/healthz"), ("gateway", "http://model-gateway:8081/healthz")):
+    with urllib.request.urlopen(url, timeout=3) as response:
+        result[name + "_status"] = response.status
+try:
+    with socket.create_connection(("1.1.1.1", 443), timeout=3):
+        result["direct_egress_reachable"] = True
+except OSError:
+    result["direct_egress_reachable"] = False
+print(json.dumps(result, sort_keys=True))
+"""
+    result = command([
+        "docker", "run", "--rm", "--network", trial_network,
+        "--read-only", "--cap-drop=ALL", "--security-opt", "no-new-privileges:true",
+        "--entrypoint", "python", AGENT_IMAGE, "-c", probe,
+    ], timeout=20)
+    observed = json.loads(result.stdout)
+    if observed != {
+        "real_key_in_agent_env": False,
+        "trigger_data_in_agent_image": False,
+        "http_tools_present": True,
+        "build_tools_absent": True,
+        "decoy_status": 200,
+        "gateway_status": 200,
+        "direct_egress_reachable": False,
+    }:
+        raise RuntimeError(f"Trial network isolation preflight failed: {observed}")
+    return {"networks": networks, "credentials": credentials, "probe": observed}
+
+
 def parsed_jsonl(text: str) -> list[dict[str, Any]]:
     events = []
     for line in text.splitlines():
@@ -115,7 +218,7 @@ def image_id(name: str) -> str | None:
 def pinned_cli_version() -> str:
     output = command([
         "docker", "run", "--rm", "--entrypoint", CLAUDE_CLI,
-        "shape-pentestgpt-agent:dev", "--version",
+        AGENT_IMAGE, "--version",
     ], timeout=30).stdout.strip()
     version = output.split(" ", 1)[0]
     if version != EXPECTED_CLAUDE_CLI_VERSION:
@@ -123,12 +226,20 @@ def pinned_cli_version() -> str:
     return version
 
 
-def run(mode: str, arm: str, *, build: bool = True) -> dict[str, Any]:
-    if mode not in {"deterministic", "connectivity", "pilot"}:
+def run(
+    mode: str, arm: str, *, build: bool = True,
+    assignment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if mode not in {"deterministic", "connectivity", "pilot", "controlled"}:
         raise ValueError("Invalid mode")
-    if mode in {"deterministic", "pilot"} and arm != "C2":
+    if mode == "pilot" and arm != "C2":
         raise ValueError(f"The {mode} mode exercises C2 only")
+    if (mode == "controlled") != (assignment is not None):
+        raise ValueError("Controlled mode requires a frozen assignment; other modes forbid one")
+    if arm not in {"C0", "C1", "C2"}:
+        raise ValueError("Unknown arm")
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
+    validate_agent_config(config)
     pentest_commit, unified_commit = validate_sources()
     run_id = "2a-" + mode[:4] + "-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
     if not re.fullmatch(r"[a-z0-9-]{1,63}", run_id):
@@ -163,6 +274,9 @@ def run(mode: str, arm: str, *, build: bool = True) -> dict[str, Any]:
         "project": project,
         "started_utc": datetime.now(timezone.utc).isoformat(),
         "config_sha256": hashlib.sha256(CONFIG.read_bytes()).hexdigest(),
+        "agent_config_sha256": hashlib.sha256(AGENT_CONFIG.read_bytes()).hexdigest(),
+        "scorer_sha256": hashlib.sha256((LAB / "telemetry" / "score_2a.py").read_bytes()).hexdigest(),
+        "controller_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "pentestgpt_commit": pentest_commit,
         "unified_agent_commit": unified_commit,
         "model": config["agent"]["model"],
@@ -172,6 +286,8 @@ def run(mode: str, arm: str, *, build: bool = True) -> dict[str, Any]:
         "max_model_calls": max_model_calls,
         "max_model_tokens": max_model_tokens,
     }
+    if assignment is not None:
+        manifest["assignment"] = assignment
     reason = "not_started"
     error: str | None = None
     agent_exit_code: int | None = None
@@ -189,14 +305,17 @@ def run(mode: str, arm: str, *, build: bool = True) -> dict[str, Any]:
             manifest["images"] = {name: image_id(image) for name, image in {
                 "decoy": "shape-web-decoy-2a:dev",
                 "gateway": "shape-model-gateway:dev",
-                "agent": "shape-pentestgpt-agent:dev",
+                "agent": AGENT_IMAGE,
             }.items()}
             if mode != "deterministic":
                 manifest["claude_code_cli_version"] = pinned_cli_version()
             resolved_compose = compose(project, ["config"], env, timeout=30).stdout
             write_private(run_dir / "compose.resolved.yaml", resolved_compose)
             manifest["resolved_compose_sha256"] = hashlib.sha256(resolved_compose.encode()).hexdigest()
-            write_private(run_dir / "trial-config.json", CONFIG.read_text(encoding="utf-8"))
+            resolved_config = {**config, "arm": arm}
+            resolved_text = json.dumps(resolved_config, indent=2, sort_keys=True) + "\n"
+            write_private(run_dir / "trial-config.json", resolved_text)
+            manifest["resolved_trial_config_sha256"] = hashlib.sha256(resolved_text.encode()).hexdigest()
             write_private(run_dir / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
             if mode == "deterministic":
                 compose(project, ["up", "-d", "--wait", "--wait-timeout", "30", "--no-build", "web-decoy-2a"], env, timeout=60)
@@ -204,14 +323,33 @@ def run(mode: str, arm: str, *, build: bool = True) -> dict[str, Any]:
                 client = command([
                     "docker", "run", "--rm", "--network", network,
                     "--mount", f"type=bind,src={LAB / 'tests'},dst=/smoke,readonly",
+                    "--env", f"SHAPE_SMOKE_ARM={arm}",
                     "--entrypoint", "python", "shape-web-decoy-2a:dev", "/smoke/docker_smoke_2a.py",
                 ], timeout=60)
                 write_private(run_dir / "client.log", client.stdout + client.stderr)
                 reason = "deterministic_complete"
             else:
                 compose(project, ["up", "-d", "--wait", "--wait-timeout", "30", "--no-build", "web-decoy-2a", "model-gateway"], env, timeout=60)
+                preflight = isolation_preflight(project, env)
+                write_private(run_dir / "isolation-preflight.json", json.dumps(preflight, indent=2, sort_keys=True) + "\n")
+                manifest["isolation_preflight"] = preflight
                 started = time.monotonic()
                 compose(project, ["up", "-d", "--no-build", "attacker-agent"], env, timeout=90)
+                agent_networks = container_networks(project, "attacker-agent", env)
+                if agent_networks != [project + "_trial_net"]:
+                    raise RuntimeError("Attacker network topology differs from the trial contract")
+                manifest["isolation_preflight"]["networks"]["attacker-agent"] = agent_networks
+                agent_credentials = container_credentials(project, "attacker-agent", env)
+                if agent_credentials != {
+                    "real_key_in_environment": False, "real_key_file_mounted": False,
+                    "arm_in_environment": False, "placeholder_auth": True,
+                }:
+                    raise RuntimeError("Attacker has access to a model credential")
+                manifest["isolation_preflight"]["credentials"]["attacker-agent"] = agent_credentials
+                (run_dir / "isolation-preflight.json").write_text(
+                    json.dumps(manifest["isolation_preflight"], indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
                 reason = "agent_exit"
                 while True:
                     wall = time.monotonic() - started
@@ -263,7 +401,10 @@ def run(mode: str, arm: str, *, build: bool = True) -> dict[str, Any]:
     manifest["observed_agent_tool_calls"] = count_tool_calls(agent_dir, run_id)
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     try:
-        score = score_events(load_events(run_dir / "decoy-events.jsonl"), run_id, arm)
+        score = score_events(
+            load_events(run_dir / "decoy-events.jsonl"), run_id, arm,
+            require_condition_delivery=True,
+        )
     except Exception as exc:
         score = {"scoring_error": f"{type(exc).__name__}: {exc}"}
     if mode == "connectivity" and reason != "connectivity_observed" and error is None:

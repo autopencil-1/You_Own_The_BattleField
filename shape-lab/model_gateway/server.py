@@ -55,6 +55,24 @@ def reported_usage(body: bytes, content_type: str) -> dict[str, int] | None:
     return usage if found else None
 
 
+def served_model(body: bytes, content_type: str) -> str | None:
+    """Read only the upstream model identifier from a JSON or SSE response."""
+    if "text/event-stream" in content_type:
+        lines = (line[6:] for line in body.splitlines() if line.startswith(b"data: "))
+    else:
+        lines = iter((body,))
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if isinstance(item, dict):
+            message = item.get("message", item)
+            if isinstance(message, dict) and isinstance(message.get("model"), str):
+                return message["model"]
+    return None
+
+
 class Gateway(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -138,7 +156,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
         with gateway.lock:
             if gateway.calls >= gateway.max_calls or gateway.tokens >= gateway.max_tokens or gateway.usage_missing:
-                gateway.emit("cap_reached", calls=gateway.calls, tokens=gateway.tokens, usage_missing=gateway.usage_missing)
+                gateway.emit(
+                    "cap_reached", calls=gateway.calls, tokens=gateway.tokens,
+                    overage_tokens=max(0, gateway.tokens - gateway.max_tokens),
+                    usage_missing=gateway.usage_missing,
+                )
                 self._reply(429, b'{"error":"trial_cap_reached"}')
                 return
             gateway.calls += 1
@@ -176,11 +198,18 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     call_number=call_number,
                     path=path.path,
                     model=gateway.model,
+                    served_model=served_model(result, content_type) if upstream_status == 200 else None,
                     status=upstream_status,
                     usage=usage,
                     total_tokens=gateway.tokens,
                     duration_ms=round((time.monotonic() - started) * 1000),
                 )
+                if gateway.calls >= gateway.max_calls or gateway.tokens >= gateway.max_tokens or gateway.usage_missing:
+                    gateway.emit(
+                        "cap_reached", calls=gateway.calls, tokens=gateway.tokens,
+                        overage_tokens=max(0, gateway.tokens - gateway.max_tokens),
+                        usage_missing=gateway.usage_missing,
+                    )
                 self._reply(upstream_status, result, content_type)
             except Exception as exc:
                 gateway.emit("gateway_error", call_number=call_number, error_type=type(exc).__name__)

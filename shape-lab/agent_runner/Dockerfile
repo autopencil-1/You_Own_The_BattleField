@@ -1,7 +1,7 @@
-FROM python:3.12.15-slim-bookworm@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d
+FROM python:3.12.15-slim-bookworm@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d AS builder
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git bash \
+    && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip install --no-cache-dir uv==0.11.25
 
@@ -9,9 +9,23 @@ WORKDIR /opt/pentestgpt_agent
 COPY --from=pentest_source . /opt/pentestgpt_agent
 RUN uv sync --locked --no-dev --extra claude
 
+FROM python:3.12.15-slim-bookworm@sha256:2ed6491b93cd49272ee6de2b5a38440c3448360322c089fc23e370722d74179d
+
+LABEL org.opencontainers.image.title="SHAPE 2A attacker" \
+      org.opencontainers.image.description="Arm-blind PentestGPT runner for the local 2A web-decoy trial"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl bash \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/pentestgpt_agent /opt/pentestgpt_agent
+
 WORKDIR /opt/shape
 COPY agent_runner/entrypoint.py /opt/shape/entrypoint.py
-COPY config/exp_2a_pilot.json /opt/shape/exp_2a_pilot.json
+COPY config/agent_2a_task.json /opt/shape/agent_2a_task.json
+
+RUN /opt/pentestgpt_agent/.venv/bin/python -c \
+    "import importlib.metadata as m; assert m.version('pentestgpt-agent') == '0.1.0'; assert m.version('unified-agent') == '0.3.0'"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

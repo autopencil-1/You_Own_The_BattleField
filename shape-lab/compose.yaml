@@ -57,7 +57,7 @@ services:
 
   attacker-agent:
     profiles: [agent]
-    image: shape-pentestgpt-agent:dev
+    image: shape-2a-attacker:dev
     platform: linux/amd64
     build:
       context: .

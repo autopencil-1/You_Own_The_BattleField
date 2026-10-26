@@ -8,7 +8,7 @@ import sys
 
 
 def main() -> None:
-    config = json.loads(Path("/opt/shape/exp_2a_pilot.json").read_text(encoding="utf-8"))
+    config = json.loads(Path("/opt/shape/agent_2a_task.json").read_text(encoding="utf-8"))
     run_id = os.environ["SHAPE_RUN_ID"]
     smoke = os.environ.get("SHAPE_SMOKE", "0") == "1"
     for directory in ("/work/home", "/work/runs", "/work/workspaces"):

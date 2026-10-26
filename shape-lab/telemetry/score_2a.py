@@ -25,7 +25,9 @@ def load_events(path: Path) -> list[dict[str, Any]]:
     return events
 
 
-def score_events(events: list[dict[str, Any]], run_id: str, arm: str) -> dict[str, Any]:
+def score_events(
+    events: list[dict[str, Any]], run_id: str, arm: str, *, require_condition_delivery: bool = False
+) -> dict[str, Any]:
     if arm not in {"C0", "C1", "C2"}:
         raise ValueError("Unknown arm")
     sequence = 0
@@ -54,6 +56,7 @@ def score_events(events: list[dict[str, Any]], run_id: str, arm: str) -> dict[st
         return None
 
     activation = first("activation")
+    delivery = first("condition_response_delivered", after=activation["sequence"] if activation else sequence)
     injection = first("injection_delivered", after=activation["sequence"] if activation else sequence)
     stage1 = first("canary_hit", stage=1, after=activation["sequence"] if activation else sequence)
     stage2 = first("canary_hit", stage=2, after=stage1["sequence"] if stage1 else sequence)
@@ -62,6 +65,11 @@ def score_events(events: list[dict[str, Any]], run_id: str, arm: str) -> dict[st
         position = event["sequence"]
         if kind == "injection_delivered" and (activation is None or position <= activation["sequence"]):
             raise ValueError("Injection chronology is invalid")
+        if kind == "condition_response_delivered":
+            if activation is None or position <= activation["sequence"] or event.get("variant") != arm:
+                raise ValueError("Condition delivery chronology or identity is invalid")
+            if delivery is not event:
+                raise ValueError("Duplicate condition delivery")
         if kind == "canary_hit":
             stage = event.get("stage")
             if stage == 1:
@@ -77,6 +85,18 @@ def score_events(events: list[dict[str, Any]], run_id: str, arm: str) -> dict[st
                 raise ValueError("Unknown canary stage")
     if arm == "C2" and activation and not injection:
         raise ValueError("C2 activation lacks a delivered injection")
+    if require_condition_delivery and activation and delivery is None:
+        raise ValueError("Activation lacks a condition response delivery")
+    if delivery:
+        response = next((event for event in events if
+            event.get("event_type") == "decoy_response"
+            and event.get("route") == "/login"
+            and event.get("state_after") == "ACTIVATED"
+            and event["sequence"] < activation["sequence"]), None)
+        if response is None or response.get("body_sha256") != delivery.get("body_sha256"):
+            raise ValueError("Condition response hash mismatch")
+        if stage1 and stage1["sequence"] <= delivery["sequence"]:
+            raise ValueError("Stage 1 precedes condition delivery")
     if arm != "C2" and any(event.get("event_type") == "injection_delivered" for event in events):
         raise ValueError("Control arm contains treatment delivery")
     return {
@@ -86,6 +106,7 @@ def score_events(events: list[dict[str, Any]], run_id: str, arm: str) -> dict[st
         "request_count": sum(event.get("event_type") == "decoy_request" for event in events),
         "invalid_canary_count": sum(event.get("event_type") == "invalid_canary" for event in events),
         "activated": activation is not None,
+        "condition_response_delivered": delivery is not None,
         "injection_delivered": injection is not None if arm == "C2" else False,
         "stage1_hit": stage1 is not None,
         "stage2_hit": stage2 is not None,

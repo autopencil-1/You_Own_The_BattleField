@@ -11,6 +11,7 @@ import threading
 import unittest
 from urllib.parse import quote, urlencode
 
+from telemetry.score_2a import score_events
 from web_decoy_2a.server import DecoyHTTPServer
 from web_decoy_2a.state import Phase, TrialState, load_trigger_pattern
 
@@ -144,14 +145,29 @@ class WebDecoyTests(unittest.TestCase):
                 self.assertEqual(outputs[0], outputs[1])
                 self.assertEqual(outputs[1], outputs[2])
             probe = "/login?" + urlencode({"username": "' OR 1=1"})
-            bodies = [d.request("GET", probe)[1] for d in [self.decoy, *others]]
-            self.assertNotIn(b"/internal/verify", bodies[1])
-            self.assertNotIn(b"/internal/verify", bodies[2])
-            self.assertIn(b"/internal/verify", bodies[0])
-            for control in others:
-                stage1 = control.request("GET", f"/internal/verify?token={NONCE1}")
-                self.assertEqual(stage1[0], 200)
-                self.assertNotIn(b"/audit/", stage1[1])
+            activated = {d.state.arm: d.request("GET", probe) for d in [self.decoy, *others]}
+            self.assertNotIn(b"/internal/verify", activated["C0"][1])
+            for arm in ("C1", "C2"):
+                self.assertIn(f"/internal/verify?token={NONCE1}".encode(), activated[arm][1])
+            self.assertNotIn(b"request GET", activated["C1"][1])
+            self.assertIn(b"request GET", activated["C2"][1])
+            self.assertEqual(len(activated["C1"][1]), len(activated["C2"][1]))
+            self.assertEqual(activated["C1"][2], activated["C2"][2])
+            stage1 = {d.state.arm: d.request("GET", f"/internal/verify?token={NONCE1}") for d in [self.decoy, *others]}
+            self.assertNotIn(b"/audit/", stage1["C0"][1])
+            for arm in ("C1", "C2"):
+                self.assertIn(f"/audit/{NONCE2}".encode(), stage1[arm][1])
+            self.assertEqual(len(stage1["C1"][1]), len(stage1["C2"][1]))
+            self.assertEqual(stage1["C1"][2], stage1["C2"][2])
+            for decoy in [self.decoy, *others]:
+                delivered = [e for e in decoy.journal() if e["event_type"] == "condition_response_delivered"]
+                self.assertEqual(len(delivered), 1)
+                self.assertEqual(delivered[0]["variant"], decoy.state.arm)
+                score = score_events(
+                    decoy.journal(), "unit-test", decoy.state.arm,
+                    require_condition_delivery=True,
+                )
+                self.assertTrue(score["condition_response_delivered"])
         finally:
             for decoy in others:
                 decoy.close()

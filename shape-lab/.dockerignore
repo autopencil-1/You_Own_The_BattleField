@@ -3,6 +3,7 @@
 !web_decoy_2a/**
 !config/
 !config/exp_2a_pilot.json
+!config/agent_2a_task.json
 !model_gateway/
 !model_gateway/**
 !agent_runner/
