@@ -1,0 +1,110 @@
+services:
+  filesystem-decoy-2b:
+    image: shape-filesystem-decoy-2b:dev
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: filesystem_decoy_2b/Dockerfile
+    environment:
+      SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2b-dev}
+      SHAPE_ARM: ${SHAPE_ARM:-B0}
+      SHAPE_2B_SEED: ${SHAPE_2B_SEED:-fixture-seed}
+      SHAPE_2B_BRANCHING: ${SHAPE_2B_BRANCHING:-4}
+      SHAPE_2B_MAX_COMMANDS: ${SHAPE_2B_MAX_COMMANDS:-50}
+    expose: ["8082"]
+    networks: [trial_net]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+
+  model-gateway:
+    profiles: [agent]
+    image: shape-model-gateway:dev
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: model_gateway/Dockerfile
+    user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
+    environment:
+      SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2b-dev}
+      SHAPE_MODEL: glm-5.3-flash
+      SHAPE_MAX_MODEL_CALLS: ${SHAPE_MAX_MODEL_CALLS:-60}
+      SHAPE_MAX_MODEL_TOKENS: ${SHAPE_MAX_MODEL_TOKENS:-200000}
+      SHAPE_KEY_FILE: /run/secrets/zai_api_key
+    volumes:
+      - type: bind
+        source: ${SHAPE_KEY_FILE:-/tmp/shape2b-dev-key}
+        target: /run/secrets/zai_api_key
+        read_only: true
+    expose: ["8081"]
+    networks: [trial_net, egress_net]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    restart: "no"
+
+  attacker-agent:
+    profiles: [agent]
+    image: shape-2b-attacker:dev
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: agent_runner/Dockerfile_2b
+      additional_contexts:
+        pentest_source: ../PentestGPT/pentestgpt_agent
+    user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
+    environment:
+      SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2b-dev}
+      SHAPE_2B_PROFILE_STATUS: fixture
+      SHAPE_2B_ALLOW_FIXTURE_MODEL: ${SHAPE_2B_ALLOW_FIXTURE_MODEL:-0}
+      SHAPE_2B_SMOKE: ${SHAPE_2B_SMOKE:-0}
+      SHAPE_2B_TARGET: ssh://lab@filesystem-decoy-2b
+      SHAPE_2B_DECOY_URL: http://filesystem-decoy-2b:8082
+      ANTHROPIC_BASE_URL: http://model-gateway:8081
+      ANTHROPIC_AUTH_TOKEN: shape-lab-placeholder
+      ANTHROPIC_CUSTOM_MODEL_OPTION: glm-5.3-flash
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: glm-5.3-flash
+      ANTHROPIC_DEFAULT_SONNET_MODEL: glm-5.3-flash
+      ANTHROPIC_DEFAULT_OPUS_MODEL: glm-5.3-flash
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      CLAUDE_CODE_MAX_RETRIES: "0"
+      DISABLE_AUTOUPDATER: "1"
+      DISABLE_TELEMETRY: "1"
+      DISABLE_ERROR_REPORTING: "1"
+      API_TIMEOUT_MS: "180000"
+    volumes:
+      - type: bind
+        source: ${SHAPE_RUN_DIR:-/tmp/shape2b-dev}/agent
+        target: /work
+    networks: [trial_net]
+    depends_on:
+      filesystem-decoy-2b:
+        condition: service_healthy
+      model-gateway:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2
+    restart: "no"
+
+networks:
+  trial_net:
+    internal: true
+  egress_net: {}

@@ -1,6 +1,14 @@
-# SHAPE 2A Web Decoy
+# SHAPE Lab
 
 This lab runs a synthetic web decoy, a pinned PentestGPT agent, and a bounded Z.AI model gateway. The trial inputs and caps are frozen in [2A_TRIAL_CONTRACT.md](2A_TRIAL_CONTRACT.md) and [config/exp_2a_pilot.json](config/exp_2a_pilot.json). The route and scoring design is in [WEB_DECOY_2A_PLAN.md](WEB_DECOY_2A_PLAN.md). The proposed three-arm study is in [CONTROLLED_2A_ESTIMATION_PLAN.md](CONTROLLED_2A_ESTIMATION_PLAN.md).
+
+The story-independent 2B virtual filesystem, imitated SSH tools, and model-free
+fixture checks are documented in [filesystem_decoy_2b/README.md](filesystem_decoy_2b/README.md).
+The proposed 2A/2B monitoring and experiment launch console is specified in
+[SHAPE_EXPERIMENT_UI_PLAN.md](SHAPE_EXPERIMENT_UI_PLAN.md); the detailed 2B
+monitor pane is in [2B_MONITOR_UI_PLAN.md](2B_MONITOR_UI_PLAN.md).
+The first local UI slice and its startup instructions are in
+[dashboard/README.md](dashboard/README.md).
 
 ## Run a check
 

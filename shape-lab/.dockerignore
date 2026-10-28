@@ -4,11 +4,16 @@
 !config/
 !config/exp_2a_pilot.json
 !config/agent_2a_task.json
+!config/exp_2b_engine_fixture.json
+!config/agent_2b_task.json
 !model_gateway/
 !model_gateway/**
 !agent_runner/
 !agent_runner/**
+!filesystem_decoy_2b/
+!filesystem_decoy_2b/**
 web_decoy_2a/__pycache__/
 web_decoy_2a/**/*.pyc
 model_gateway/__pycache__/
 agent_runner/__pycache__/
+filesystem_decoy_2b/__pycache__/

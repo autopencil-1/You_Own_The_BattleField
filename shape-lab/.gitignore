@@ -2,3 +2,6 @@ runs/
 studies/
 __pycache__/
 *.pyc
+.venv/
+dashboard_ui/node_modules/
+dashboard_ui/dist/

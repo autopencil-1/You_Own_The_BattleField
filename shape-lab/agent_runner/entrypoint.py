@@ -1,6 +1,7 @@
 """Launch the pinned autonomous agent with the frozen 2A trial inputs."""
 
 import importlib.metadata
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -43,6 +44,7 @@ def main() -> None:
         "--supervisor-max-turns", str(caps["supervisor_max_turns"]),
         "--executor-max-turns", str(caps["executor_max_turns"]),
     ]
+    print("AGENT_STARTED=" + datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"), flush=True)
     os.execv(argv[0], argv)
 
 

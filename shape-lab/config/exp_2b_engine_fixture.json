@@ -1,0 +1,13 @@
+{
+  "directories": ["/", "/etc", "/home", "/home/lab", "/var", "/var/records"],
+  "files": {
+    "/etc/os-release": "NAME=\"Synthetic Ubuntu Lab\"\nID=ubuntu\n",
+    "/home/lab/README.txt": "This fixture checks the virtual filesystem engine.\n"
+  },
+  "expandable_roots": ["/var/records"],
+  "directory_words": ["batch", "index", "snapshot", "volume"],
+  "generated_file_name": "README.txt",
+  "generated_file_text": "Generated fixture record.\n",
+  "reinforcement_text": "Fixture continuation note.",
+  "home": "/home/lab"
+}

@@ -16,6 +16,7 @@ import uuid
 from typing import Any
 
 from telemetry.score_2a import load_events, score_events
+from .live_capture import LiveCapture
 
 
 LAB = Path(__file__).resolve().parents[1]
@@ -229,6 +230,7 @@ def pinned_cli_version() -> str:
 def run(
     mode: str, arm: str, *, build: bool = True,
     assignment: dict[str, Any] | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     if mode not in {"deterministic", "connectivity", "pilot", "controlled"}:
         raise ValueError("Invalid mode")
@@ -241,8 +243,9 @@ def run(
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
     validate_agent_config(config)
     pentest_commit, unified_commit = validate_sources()
-    run_id = "2a-" + mode[:4] + "-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
-    if not re.fullmatch(r"[a-z0-9-]{1,63}", run_id):
+    expected_prefix = "2a-" + mode[:4] + "-"
+    run_id = run_id or expected_prefix + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    if not re.fullmatch(r"[a-z0-9-]{1,63}", run_id) or not run_id.startswith(expected_prefix):
         raise ValueError("Invalid run ID")
     project = "shape" + run_id
     run_dir = LAB / "runs" / run_id
@@ -292,6 +295,7 @@ def run(
     error: str | None = None
     agent_exit_code: int | None = None
     started = 0.0
+    live_capture: LiveCapture | None = None
     with tempfile.TemporaryDirectory(prefix="shape2a-key-") as secret_dir:
         key_file = Path(secret_dir) / "zai_api_key"
         if mode != "deterministic":
@@ -319,6 +323,9 @@ def run(
             write_private(run_dir / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
             if mode == "deterministic":
                 compose(project, ["up", "-d", "--wait", "--wait-timeout", "30", "--no-build", "web-decoy-2a"], env, timeout=60)
+                live_capture = LiveCapture(COMPOSE, project, run_dir,
+                                           {"web-decoy-2a": "decoy-live.jsonl"}, env)
+                live_capture.start()
                 network = project + "_trial_net"
                 client = command([
                     "docker", "run", "--rm", "--network", network,
@@ -330,11 +337,16 @@ def run(
                 reason = "deterministic_complete"
             else:
                 compose(project, ["up", "-d", "--wait", "--wait-timeout", "30", "--no-build", "web-decoy-2a", "model-gateway"], env, timeout=60)
+                live_capture = LiveCapture(COMPOSE, project, run_dir,
+                                           {"web-decoy-2a": "decoy-live.jsonl",
+                                            "model-gateway": "gateway-live.jsonl"}, env)
+                live_capture.start()
                 preflight = isolation_preflight(project, env)
                 write_private(run_dir / "isolation-preflight.json", json.dumps(preflight, indent=2, sort_keys=True) + "\n")
                 manifest["isolation_preflight"] = preflight
                 started = time.monotonic()
                 compose(project, ["up", "-d", "--no-build", "attacker-agent"], env, timeout=90)
+                live_capture.add("attacker-agent", "agent-live.log")
                 agent_networks = container_networks(project, "attacker-agent", env)
                 if agent_networks != [project + "_trial_net"]:
                     raise RuntimeError("Attacker network topology differs from the trial contract")
@@ -384,6 +396,8 @@ def run(
             reason = "controller_error"
             error = f"{type(exc).__name__}: {exc}"
         finally:
+            if live_capture is not None:
+                live_capture.stop()
             for service, filename in [
                 ("web-decoy-2a", "decoy-events.jsonl"),
                 ("model-gateway", "gateway-events.jsonl"),
@@ -421,8 +435,9 @@ def main() -> None:
     parser.add_argument("--mode", choices=["deterministic", "connectivity", "pilot"], required=True)
     parser.add_argument("--arm", choices=["C0", "C1", "C2"], default="C2")
     parser.add_argument("--no-build", action="store_true")
+    parser.add_argument("--run-id", default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
-    result = run(args.mode, args.arm, build=not args.no_build)
+    result = run(args.mode, args.arm, build=not args.no_build, run_id=args.run_id)
     print(json.dumps({
         "run_dir": result["run_dir"],
         "termination_reason": result["manifest"]["termination_reason"],
