@@ -203,10 +203,10 @@ Claude transcripts. Browser rendering uses text nodes and bounded previews.
    a synthetic agent-trace fixture to exercise live updates and replay. Assert
    that displayed server response bytes hash to the archived response and
    that the timer starts at `agent_started`, not controller preparation.
-6. **Later, after story freeze:** run one bounded real-agent connectivity
-   check, verify actual PentestGPT event timing and pairing, then pilot the
-   full story. Monitoring code and UI settings should be pinned before the
-   randomized 40-run study.
+6. **Agent validation and later study:** the B0 fixture connectivity check is
+   available after explicit operator launch; use it to verify PentestGPT event
+   timing and pairing. After story freeze, pilot the full story. Monitoring
+   code and UI settings should be pinned before the randomized 40-run study.
 
 The initial deliverable is a live observer and honest replay of existing
 artifacts. No UI action changes the agent, virtual filesystem, treatment, or

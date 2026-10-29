@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -10,9 +11,9 @@ from fastapi.responses import FileResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 
-from .core import (FixtureRequest, JOBS, UI_DIST, capabilities, collector,
+from .core import (RunRequest, JOBS, UI_DIST, capabilities, collector,
                    job_status, list_runs, provisional_snapshot, run_path, run_snapshot)
-from .jobs import launch_fixture
+from .jobs import launch_run
 
 
 app = FastAPI(title="SHAPE experiment console", docs_url=None, redoc_url=None)
@@ -62,13 +63,15 @@ async def runs(limit: int = 80) -> dict:
 
 
 @app.post("/api/runs", status_code=202)
-async def start_run(request: Request, payload: FixtureRequest,
+async def start_run(request: Request, payload: RunRequest,
                     x_shape_launch_token: str | None = Header(default=None)) -> dict:
     _guard_launch(request, x_shape_launch_token)
     try:
-        return launch_fixture(payload)
+        return launch_run(payload)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/jobs/{run_id}")

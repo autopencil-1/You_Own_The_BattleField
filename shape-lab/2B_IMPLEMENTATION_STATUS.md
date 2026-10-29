@@ -1,6 +1,6 @@
 # SHAPE 2B implementation status
 
-**Updated:** 2026-10-26. **Stage:** story-independent engineering setup. No 2B
+**Updated:** 2026-10-28. **Stage:** story-independent engineering setup. No 2B
 agent pilot or controlled study has run, so there is no retention finding.
 
 ## Implemented
@@ -26,16 +26,21 @@ agent pilot or controlled study has run, so there is no retention finding.
   but has not been invoked.
 - A model-free replay checker for event sequence, response hashes, connection
   chronology, command/result consistency, and reinforcement attribution.
+- The local dashboard can prepare both image sets with `make up` and launch the
+  bounded B0 fixture connectivity check on explicit operator action. The
+  dashboard does not start a model run during setup.
 
 ## Verification
 
-- `python3 -m unittest discover -s tests -v`: 24 tests passed.
+- `make check`: 30 tests and the dashboard frontend build passed.
 - `docker compose --profile agent -f compose_2b.yaml config --quiet`: passed.
 - `shape-2b-attacker:dev` built and passed its offline image/tool smoke with
   networking disabled.
 - Model-free Docker fixture checks passed for B0, B1, B2, and B3. Each check
   exercised the actual `ssh_connect`/`ssh_exec` client inside the attacker
   image and verified no direct external egress.
+- `make up` built both image sets and started the dashboard; one model-free B0
+  run launched through its API completed and replayed successfully.
 - The fixture archives replay. One early B2 check failed because its smoke
   script looked for reinforcement on the fourth qualifying command instead of
   the configured third; the failed archive remains in ignored `runs/`, and the
@@ -51,8 +56,9 @@ connectivity check. No inference has been spent on 2B.
 
 The synthetic host story, final files/clues, static-tree comparability,
 reinforcement wording and schedule, and suspicion/abandonment rubric remain to
-be decided and frozen. After that: build and fingerprint final images; run one
-actual agent connectivity check; pilot the final configuration; then prepare
+be decided and frozen. The B0 fixture connectivity path is available now as an
+engineering check. After story freeze: build and fingerprint final images;
+pilot the final configuration; then prepare
 the randomized 10-runs-per-arm, 10-minute-or-50-action study already agreed
 with the user. The 2A model-call and token caps remain additional upper bounds.
 

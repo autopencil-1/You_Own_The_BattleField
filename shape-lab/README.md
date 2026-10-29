@@ -10,6 +10,11 @@ monitor pane is in [2B_MONITOR_UI_PLAN.md](2B_MONITOR_UI_PLAN.md).
 The first local UI slice and its startup instructions are in
 [dashboard/README.md](dashboard/README.md).
 
+From the repository root, `make up` prepares both Docker image sets and the
+local dashboard at <http://127.0.0.1:8787/>. `make down` stops the dashboard.
+The repository root `.env` supplies `ZAI_API_KEY` for agent runs; pinned agent
+settings remain in `config/agent_2a_task.json` and `config/agent_2b_task.json`.
+
 ## Run a check
 
 From `shape-lab/`:

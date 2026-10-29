@@ -74,7 +74,7 @@ make the dashboard look more active.
 | 2A | C2 pilot | Full C2 engineering pilot with frozen task/caps | C2 fixed; show model-use and 20-minute cap before launch |
 | 2A | Controlled cohort | Separate `controlled_2a.py` prepare/execute/status workflow, with pilot and fingerprint gates | Dedicated study workflow: prepare balanced schedule, preview, then execute; individual arm/cap controls disabled |
 | 2B | Deterministic check | Model-free B0/B1/B2/B3 fixture | Select arm and validated seed; label **fixture check** |
-| 2B | Connectivity check | B0-only, bounded real-agent check on generic fixture | Keep disabled until the story and final profile are frozen; current controller has an explicit fixture-model opt-in |
+| 2B | Connectivity check | B0-only, bounded real-agent check on generic fixture | Available after the user's explicit approval; label it an engineering check, never a study result |
 | 2B | Pilot and 40-run study | Not implemented yet | Show **planned**, not a functioning launch button; implement after story/profile freeze |
 
 The home page must never make fixture checks look like agent outcomes. For a
@@ -203,9 +203,10 @@ anchor is missing, never `00:00` by assumption.
    the UI. Verify that the browser can disconnect/reconnect and replay the
    same event sequence, and that no model call occurs in fixture mode.
 6. Check the existing 2A connectivity and pilot flows through the UI only when
-   explicitly launched. Keep 2B agent runs gated until its synthetic story and
-   versioned experimental profile are frozen; then add its pilot and 40-run
-   scheduler with the agreed 10-minute or 50-action cap.
+   explicitly launched. The B0 fixture connectivity run is available as an
+   engineering check after user approval. Keep the 2B pilot and 40-run study
+   gated until its synthetic story and versioned experimental profile are
+   frozen; then add the agreed 10-minute or 50-action cap.
 
 No backend result should depend on whether anyone opened the dashboard. A
 closed browser, API restart, or telemetry display failure must not alter the

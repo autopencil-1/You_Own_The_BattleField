@@ -57,7 +57,7 @@ def read_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-class FixtureRequest(BaseModel):
+class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     experiment: str
@@ -68,29 +68,56 @@ class FixtureRequest(BaseModel):
     branching_factor: int = Field(default=4, ge=1, le=15)
 
     @model_validator(mode="after")
-    def validate_fixture(self) -> "FixtureRequest":
+    def validate_run(self) -> "RunRequest":
         if self.experiment not in ARMS or self.arm not in ARMS[self.experiment]:
             raise ValueError("Experiment and arm do not match")
-        if self.mode != "deterministic":
-            raise ValueError("The first UI slice launches model-free deterministic checks only")
+        allowed = {"2A": {"deterministic", "connectivity", "pilot"},
+                   "2B": {"deterministic", "connectivity"}}
+        if self.mode not in allowed[self.experiment]:
+            raise ValueError("Mode is unavailable for this experiment")
+        if self.experiment == "2A" and self.mode == "pilot" and self.arm != "C2":
+            raise ValueError("The 2A pilot uses C2 only")
+        if self.experiment == "2B" and self.mode == "connectivity" and self.arm != "B0":
+            raise ValueError("The 2B connectivity fixture uses B0 only")
         if not SEED_RE.fullmatch(self.seed):
             raise ValueError("Invalid seed")
         if self.experiment == "2A" and (self.seed != "fixture-seed" or self.branching_factor != 4):
             raise ValueError("2A does not use the 2B seed or branching factor")
+        if self.experiment == "2B" and self.mode == "connectivity" and self.branching_factor != 4:
+            raise ValueError("The 2B connectivity fixture uses branching factor 4")
         return self
 
 
+def key_configured() -> bool:
+    """Report only whether the root .env contains a nonempty Z.AI key."""
+    path = LAB.parent / ".env"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        name, separator, value = line.removeprefix("export ").partition("=")
+        if separator and name.strip() == "ZAI_API_KEY":
+            return bool(value.strip().strip("\"'"))
+    return False
+
+
 def capabilities() -> dict[str, Any]:
+    agent_2a = read_json(LAB / "config" / "agent_2a_task.json") or {}
+    agent_2b = read_json(LAB / "config" / "agent_2b_task.json") or {}
     return {
         "schema_version": 1,
         "experiments": [
             {"id": "2A", "name": "OBEY", "arms": list(ARMS["2A"]),
-             "launch_modes": ["deterministic"], "future_modes": ["connectivity", "pilot", "controlled"]},
+             "launch_modes": ["deterministic", "connectivity", "pilot"],
+             "agent": agent_2a.get("agent"), "pilot_caps": agent_2a.get("caps_per_trial")},
             {"id": "2B", "name": "EXPLORE", "arms": list(ARMS["2B"]),
-             "launch_modes": ["deterministic"], "future_modes": ["connectivity", "pilot", "controlled"]},
+             "launch_modes": ["deterministic", "connectivity"],
+             "agent": agent_2b.get("agent"), "fixture_caps": {"wall_seconds": 240, "max_agent_tool_calls": 20,
+                                                                  "max_model_calls": 8, "max_model_tokens_input_plus_output": 100000}},
         ],
-        "fixture_only": True,
-        "agent_model": "glm-5.3-flash",
+        "credential_configured": key_configured(),
+        "agent_settings_source": "config/agent_2a_task.json and config/agent_2b_task.json",
     }
 
 
@@ -280,6 +307,7 @@ def run_snapshot(run_id: str) -> dict[str, Any]:
         "finished_utc": manifest.get("finished_utc"),
         "termination_reason": manifest.get("termination_reason"),
         "error": manifest.get("error") or job.get("error"),
+        "max_wall_seconds": manifest.get("max_wall_seconds") or job.get("max_wall_seconds"),
         "experimental_result": bool(manifest.get("experimental_result", False)),
         "event_count": len(events),
         "score": (read_json(path / "result.json") or {}).get("score"),
@@ -297,6 +325,7 @@ def provisional_snapshot(run_id: str) -> dict[str, Any] | None:
         "status": job.get("status"), "started_utc": job.get("created_utc"),
         "agent_started_utc": None, "finished_utc": job.get("finished_utc"),
         "termination_reason": job.get("termination_reason"),
-        "error": job.get("error"), "experimental_result": False,
+        "error": job.get("error"), "max_wall_seconds": job.get("max_wall_seconds"),
+        "experimental_result": False,
         "event_count": 0, "score": None, "job": job,
     }

@@ -7,12 +7,12 @@ import os
 import sys
 import traceback
 
-from .core import FixtureRequest, JOBS, job_status, private_json, utc_now
+from .core import RunRequest, JOBS, job_status, private_json, utc_now
 
 
 def main(run_id: str) -> int:
     folder = JOBS / run_id
-    request = FixtureRequest.model_validate_json((folder / "request.json").read_text(encoding="utf-8"))
+    request = RunRequest.model_validate_json((folder / "request.json").read_text(encoding="utf-8"))
     lock_path = JOBS / "active.lock"
     descriptor = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
     try:
@@ -20,7 +20,7 @@ def main(run_id: str) -> int:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             status = job_status(run_id) or {}
-            status.update({"status": "failed", "error": "Another fixture worker holds the trial lock",
+            status.update({"status": "failed", "error": "Another worker holds the trial lock",
                            "finished_utc": utc_now(), "pid": os.getpid()})
             private_json(folder / "status.json", status)
             return 1
@@ -30,11 +30,15 @@ def main(run_id: str) -> int:
         try:
             if request.experiment == "2A":
                 from experiment_controller.run_2a import run
-                result = run("deterministic", request.arm, build=request.build, run_id=run_id)
+                result = run(request.mode, request.arm, build=request.build, run_id=run_id)
             else:
-                from experiment_controller.run_2b import run_deterministic
-                result = run_deterministic(request.arm, build=request.build, seed=request.seed,
-                                           branching_factor=request.branching_factor, run_id=run_id)
+                if request.mode == "deterministic":
+                    from experiment_controller.run_2b import run_deterministic
+                    result = run_deterministic(request.arm, build=request.build, seed=request.seed,
+                                               branching_factor=request.branching_factor, run_id=run_id)
+                else:
+                    from experiment_controller.run_2b import run_connectivity
+                    result = run_connectivity(build=request.build, seed=request.seed, run_id=run_id)
             manifest = result["manifest"]
             error = manifest.get("error")
             if request.experiment == "2A" and "scoring_error" in result.get("score", {}):

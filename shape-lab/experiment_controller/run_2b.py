@@ -215,12 +215,15 @@ print("SSH_TOOL_TRANSPORT=passed")
     return result
 
 
-def run_connectivity(*, build: bool = True, seed: str = "fixture-seed") -> dict[str, Any]:
+def run_connectivity(*, build: bool = True, seed: str = "fixture-seed",
+                     run_id: str | None = None) -> dict[str, Any]:
     """Bounded real-agent check of the tool seam; not an experiment outcome."""
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", seed):
         raise ValueError("Invalid seed")
     pentest_commit, unified_commit = validate_sources()
-    run_id = "2b-conn-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    run_id = run_id or "2b-conn-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    if not re.fullmatch(r"2b-conn-[a-z0-9-]{1,53}", run_id):
+        raise ValueError("Invalid run ID")
     project = "shape" + run_id
     run_dir = LAB / "runs" / run_id
     run_dir.mkdir(parents=True, mode=0o700)
@@ -409,7 +412,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.mode == "connectivity" and args.arm != "B0":
         parser.error("Fixture connectivity mode uses B0 only")
-    result = (run_connectivity(build=not args.no_build, seed=args.seed)
+    result = (run_connectivity(build=not args.no_build, seed=args.seed, run_id=args.run_id)
               if args.mode == "connectivity" else
               run_deterministic(args.arm, build=not args.no_build, seed=args.seed,
                                 branching_factor=args.branching_factor, run_id=args.run_id))

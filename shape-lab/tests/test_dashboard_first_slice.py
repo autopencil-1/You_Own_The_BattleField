@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -12,28 +13,37 @@ from unittest.mock import patch
 
 try:
     from pydantic import ValidationError
-    from dashboard import core
+    from fastapi import Response
+    from dashboard import app, core, worker
 except ModuleNotFoundError:
     ValidationError = None  # type: ignore[assignment]
+    Response = None  # type: ignore[assignment]
+    app = None  # type: ignore[assignment]
     core = None  # type: ignore[assignment]
+    worker = None  # type: ignore[assignment]
 
 
 @unittest.skipIf(core is None, "Dashboard dependencies are not installed")
 class DashboardFirstSliceTests(unittest.TestCase):
-    def test_closed_fixture_launch_schema(self) -> None:
+    def test_closed_launch_mode_matrix(self) -> None:
         assert core is not None
-        value = core.FixtureRequest(experiment="2B", arm="B3", seed="preview-7", branching_factor=6)
+        value = core.RunRequest(experiment="2B", arm="B3", seed="preview-7", branching_factor=6)
         self.assertEqual(value.mode, "deterministic")
+        self.assertEqual(core.RunRequest(experiment="2A", arm="C2", mode="pilot").mode, "pilot")
+        self.assertEqual(core.RunRequest(experiment="2B", arm="B0", mode="connectivity").mode, "connectivity")
         for invalid in (
             {"experiment": "2A", "arm": "B3"},
+            {"experiment": "2A", "arm": "C0", "mode": "pilot"},
             {"experiment": "2B", "arm": "B3", "mode": "connectivity"},
+            {"experiment": "2B", "arm": "B0", "mode": "pilot"},
+            {"experiment": "2B", "arm": "B0", "mode": "connectivity", "branching_factor": 7},
             {"experiment": "2A", "arm": "C2", "seed": "other"},
             {"experiment": "2B", "arm": "B1", "seed": "bad seed"},
             {"experiment": "2B", "arm": "B1", "branching_factor": 16},
             {"experiment": "2B", "arm": "B1", "SHAPE_KEY_FILE": "/tmp/key"},
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValidationError):
-                core.FixtureRequest.model_validate(invalid)
+                core.RunRequest.model_validate(invalid)
 
     def test_live_and_final_decoy_lines_deduplicate_and_verify(self) -> None:
         assert core is not None
@@ -96,6 +106,34 @@ class DashboardFirstSliceTests(unittest.TestCase):
             self.assertIsNotNone(snapshot)
             self.assertEqual(snapshot["status"], "queued")
             self.assertEqual(snapshot["event_count"], 0)
+
+    def test_worker_dispatches_agent_modes_without_changing_settings(self) -> None:
+        assert core is not None and worker is not None
+        for experiment, mode, arm, run_id, target in (
+            ("2A", "pilot", "C2", "2a-pilo-20261026000000-a1b2c3", "experiment_controller.run_2a.run"),
+            ("2B", "connectivity", "B0", "2b-conn-20261026000000-a1b2c3", "experiment_controller.run_2b.run_connectivity"),
+        ):
+            with self.subTest(experiment=experiment), tempfile.TemporaryDirectory() as temporary:
+                jobs = Path(temporary) / ".dashboard-jobs"
+                request = core.RunRequest(experiment=experiment, mode=mode, arm=arm, build=False)
+                core.private_json(jobs / run_id / "request.json", request.model_dump())
+                core.private_json(jobs / run_id / "status.json", {"run_id": run_id, "status": "queued"})
+                with patch.object(core, "JOBS", jobs), patch.object(worker, "JOBS", jobs), \
+                     patch(target, return_value={"manifest": {"termination_reason": "connectivity_observed", "error": None}}) as mocked:
+                    self.assertEqual(worker.main(run_id), 0)
+                    self.assertEqual(core.job_status(run_id)["status"], "complete")
+                if experiment == "2A":
+                    mocked.assert_called_once_with("pilot", "C2", build=False, run_id=run_id)
+                else:
+                    mocked.assert_called_once_with(build=False, seed="fixture-seed", run_id=run_id)
+
+    def test_session_token_is_private_and_reused(self) -> None:
+        assert app is not None and Response is not None
+        with tempfile.TemporaryDirectory() as temporary, patch.object(app, "JOBS", Path(temporary)):
+            first = asyncio.run(app.session(Response()))["launch_token"]
+            second = asyncio.run(app.session(Response()))["launch_token"]
+            self.assertEqual(first, second)
+            self.assertEqual((Path(temporary) / "session.token").stat().st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import './styles.css'
 
 type Experiment = '2A' | '2B'
+type RunMode = 'deterministic' | 'connectivity' | 'pilot'
+type Capabilities = { credential_configured: boolean; experiments: Array<{ id: Experiment; agent: { model: string; effort: string } }> }
 type RunRow = {
   run_id: string
   experiment: Experiment
@@ -37,6 +39,7 @@ type Snapshot = {
   finished_utc: string | null
   termination_reason: string | null
   error: string | null
+  max_wall_seconds: number | null
   experimental_result: boolean
   event_count: number
   score: Record<string, unknown> | null
@@ -44,6 +47,7 @@ type Snapshot = {
 }
 type FormState = {
   experiment: Experiment
+  mode: RunMode
   arm: string
   seed: string
   branching_factor: number
@@ -51,6 +55,8 @@ type FormState = {
 }
 
 const armChoices: Record<Experiment, string[]> = { '2A': ['C0', 'C1', 'C2'], '2B': ['B0', 'B1', 'B2', 'B3'] }
+const modeChoices: Record<Experiment, RunMode[]> = { '2A': ['pilot', 'connectivity', 'deterministic'], '2B': ['connectivity', 'deterministic'] }
+const modeNames: Record<RunMode, string> = { pilot: 'C2 agent pilot', connectivity: 'Agent connectivity check', deterministic: 'Model-free fixture check' }
 
 async function getJSON<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: 'no-store' })
@@ -115,6 +121,7 @@ function statusClass(status: string): string {
 function App() {
   const [runId, setRunId] = useState(new URLSearchParams(window.location.search).get('run'))
   const [rows, setRows] = useState<RunRow[]>([])
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null)
   const [form, setForm] = useState<FormState | null>(null)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -143,6 +150,7 @@ function App() {
   useEffect(() => {
     if (runId) return
     let alive = true
+    void getJSON<Capabilities>('/api/experiments').then(value => { if (alive) setCapabilities(value) }).catch(err => { if (alive) setError(String(err)) })
     const refresh = () => getJSON<{ runs: RunRow[] }>('/api/runs').then(data => { if (alive) setRows(data.runs) }).catch(err => { if (alive) setError(String(err)) })
     void refresh()
     const interval = window.setInterval(refresh, 3000)
@@ -200,6 +208,10 @@ function App() {
   const agentToolCount = agentEvents.filter(event => event.kind === 'tool_call').length
   const serverActions = serverEvents.filter(event => event.kind === (snapshot?.experiment === '2A' ? 'decoy_request' : 'filesystem_interaction')).length
   const modelCalls = serverEvents.filter(event => event.kind === 'model_call').length
+  const modelRun = form?.mode !== 'deterministic'
+  const runLimit = form?.mode === 'pilot' ? '20 min · 80 tools · 60 model calls' :
+    form?.mode === 'connectivity' ? '4 min · 20 tools · 8 model calls' : 'No agent or model calls'
+  const selectedAgent = capabilities?.experiments.find(item => item.id === form?.experiment)?.agent
 
   async function launch() {
     if (!form || launching) return
@@ -209,7 +221,7 @@ function App() {
       const session = await getJSON<{ launch_token: string }>('/api/session')
       const response = await fetch('/api/runs', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shape-Launch-Token': session.launch_token },
-        body: JSON.stringify({ experiment: form.experiment, mode: 'deterministic', arm: form.arm,
+        body: JSON.stringify({ experiment: form.experiment, mode: form.mode, arm: form.arm,
           build: form.build, seed: form.seed, branching_factor: form.branching_factor }),
       })
       if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`)
@@ -235,7 +247,7 @@ function App() {
       <section className="intro">
         <p className="eyebrow">CONTROLLED OBSERVATION</p>
         <h1>Watch the agent.<br /><em>Read the environment.</em></h1>
-        <p>Launch a model-free check or replay an archived run. The agent and decoy stay in separate, isolated trial containers.</p>
+        <p>Launch an agent run or model-free check, then watch agent activity beside the decoy timeline. Each trial uses isolated containers.</p>
       </section>
       <div className="experiment-grid">
         {(['2A', '2B'] as Experiment[]).map(experiment => <article className={`experiment-card card-${experiment.toLowerCase()}`} key={experiment}>
@@ -243,7 +255,7 @@ function App() {
           <h2>{experiment === '2A' ? 'OBEY' : 'EXPLORE'}</h2>
           <p>{experiment === '2A' ? 'Track web probes, activation, and the two canary stages.' : 'Track virtual shell commands and the filesystem that answers them.'}</p>
           <div className="arm-tags">{armChoices[experiment].map(arm => <span key={arm}>{arm}</span>)}</div>
-          <button className="primary-button" onClick={() => { setForm({ experiment, arm: armChoices[experiment][0], seed: 'fixture-seed', branching_factor: 4, build: false }); setError(null) }}>New run <span>→</span></button>
+          <button className="primary-button" onClick={() => { setForm({ experiment, mode: experiment === '2A' ? 'pilot' : 'connectivity', arm: experiment === '2A' ? 'C2' : 'B0', seed: 'fixture-seed', branching_factor: 4, build: false }); setError(null) }}>New run <span>→</span></button>
         </article>)}
       </div>
       <section className="recent-section">
@@ -257,9 +269,11 @@ function App() {
     </main> : <main className="run-page">
       <div className="run-header">
         <div><button className="back-button" onClick={() => navigate(null)}>← All runs</button><p className="eyebrow">{snapshot?.experiment === '2A' ? '2A · OBEY' : snapshot?.experiment === '2B' ? '2B · EXPLORE' : 'RUN'}</p><h1 className="run-title">{runId}</h1><div className="run-meta"><span className={statusClass(snapshot?.status || 'queued')}>{snapshot?.status || 'loading'}</span><span>{snapshot?.mode || '—'}</span><span>{snapshot?.arm || '—'}</span><span>{snapshot?.experimental_result ? 'EXPERIMENTAL' : 'ENGINEERING / FIXTURE'}</span></div></div>
-        <div className="timer-card"><span>AGENT ELAPSED</span><strong>{elapsed(agentStarted, agentStop, now)}<small> / {snapshot?.experiment === '2B' ? '10:00' : '20:00'}</small></strong><div>Decoy engaged <b>{elapsed(entryEvent?.occurred_utc || null, agentStop, now)}</b></div></div>
+        <div className="timer-card"><span>AGENT ELAPSED</span><strong>{elapsed(agentStarted, agentStop, now)}<small> / {snapshot?.max_wall_seconds ? `${Math.floor(snapshot.max_wall_seconds / 60)}:00` : '—'}</small></strong><div>Decoy engaged <b>{elapsed(entryEvent?.occurred_utc || null, agentStop, now)}</b></div></div>
       </div>
       {snapshot?.mode === 'deterministic_fixture' || snapshot?.mode === 'deterministic' ? <div className="fixture-banner">MODEL-FREE FIXTURE CHECK <span>•</span> No autonomous agent is launched in this mode. Server events are live evidence of the check; agent activity is available in archived agent runs.</div> : null}
+      {snapshot?.mode === 'connectivity_fixture' || snapshot?.experiment === '2B' && snapshot?.mode === 'connectivity' ? <div className="fixture-banner">2B AGENT CONNECTIVITY CHECK <span>•</span> B0 uses generic fixture content. This is an engineering check, not a B0–B3 treatment result.</div> : null}
+      {snapshot?.error && <div className="fixture-banner">RUN ERROR <span>•</span> {snapshot.error}</div>}
       <div className="monitor-grid">
         <section className="monitor-panel agent-panel"><div className="panel-heading"><div><span className="panel-kicker">01 / AGENT</span><h2>Activity</h2></div><span className="panel-count">{agentEvents.length} events</span></div>
           <div className="event-scroll">{agentEvents.length ? agentEvents.map(event => <button key={event.event_id} className={`event-card ${selectedId === event.event_id ? 'chosen' : ''}`} onClick={() => setSelectedId(event.event_id)}>
@@ -276,12 +290,13 @@ function App() {
     </main>}
 
     {error && <div className="error-toast" role="alert">{error}<button onClick={() => setError(null)}>×</button></div>}
-    {form && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setForm(null) }}><section className="config-modal" role="dialog" aria-modal="true" aria-label="Configure run"><div className="modal-top"><span>NEW {form.experiment} RUN</span><button onClick={() => setForm(null)}>×</button></div><h2>Fixture check</h2><p>Exercises the decoy with scripted probes. No model call or autonomous agent is started.</p>
-      <label>Experiment arm<select value={form.arm} onChange={event => setForm({ ...form, arm: event.target.value })}>{armChoices[form.experiment].map(arm => <option key={arm}>{arm}</option>)}</select></label>
-      {form.experiment === '2B' && <><label>Filesystem seed<input value={form.seed} maxLength={128} onChange={event => setForm({ ...form, seed: event.target.value })} /></label><label>Branching factor<input type="number" min={1} max={15} value={form.branching_factor} onChange={event => setForm({ ...form, branching_factor: Number(event.target.value) })} /></label></>}
-      <label className="checkbox-row"><input type="checkbox" checked={form.build} onChange={event => setForm({ ...form, build: event.target.checked })} /><span>Build images before this check</span></label>
-      <div className="config-summary"><span>MODE</span><strong>deterministic · model-free</strong><span>OUTPUT</span><strong>private run archive</strong><span>MODEL COST</span><strong>none</strong></div>
-      <button className="primary-button launch-button" disabled={launching || (form.experiment === '2B' && (!form.seed || form.branching_factor < 1 || form.branching_factor > 15))} onClick={launch}>{launching ? 'Starting…' : 'Run experiment'} <span>→</span></button>
+    {form && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setForm(null) }}><section className="config-modal" role="dialog" aria-modal="true" aria-label="Configure run"><div className="modal-top"><span>NEW {form.experiment} RUN</span><button onClick={() => setForm(null)}>×</button></div><h2>{modeNames[form.mode]}</h2><p>{form.mode === 'pilot' ? 'Runs the pinned PentestGPT agent against the 2A C2 pilot. Model calls use the key in the repository .env.' : form.mode === 'connectivity' ? form.experiment === '2B' ? 'Runs PentestGPT against the B0 generic fixture to verify the imitated SSH path. This is not a study result.' : 'Runs a bounded PentestGPT check against the 2A web decoy.' : 'Exercises the decoy with scripted probes. No autonomous agent or model call starts.'}</p>
+      <label>Run mode<select value={form.mode} onChange={event => { const mode = event.target.value as RunMode; setForm({ ...form, mode, arm: form.experiment === '2A' && mode === 'pilot' ? 'C2' : form.experiment === '2B' && mode === 'connectivity' ? 'B0' : form.arm, branching_factor: mode === 'connectivity' ? 4 : form.branching_factor }) }}>{modeChoices[form.experiment].map(mode => <option key={mode} value={mode}>{modeNames[mode]}</option>)}</select></label>
+      <label>Experiment arm<select value={form.arm} disabled={form.mode === 'pilot' || form.experiment === '2B' && form.mode === 'connectivity'} onChange={event => setForm({ ...form, arm: event.target.value })}>{(form.mode === 'pilot' ? ['C2'] : form.experiment === '2B' && form.mode === 'connectivity' ? ['B0'] : armChoices[form.experiment]).map(arm => <option key={arm}>{arm}</option>)}</select></label>
+      {form.experiment === '2B' && <><label>Filesystem seed<input value={form.seed} maxLength={128} onChange={event => setForm({ ...form, seed: event.target.value })} /></label>{form.mode === 'deterministic' && <label>Branching factor<input type="number" min={1} max={15} value={form.branching_factor} onChange={event => setForm({ ...form, branching_factor: Number(event.target.value) })} /></label>}</>}
+      <label className="checkbox-row"><input type="checkbox" checked={form.build} onChange={event => setForm({ ...form, build: event.target.checked })} /><span>Rebuild Docker images for this run</span></label>
+      <div className="config-summary"><span>AGENT</span><strong>{modelRun ? `PentestGPT · ${selectedAgent?.model || 'glm-5.3-flash'} · ${selectedAgent?.effort || 'max'} effort` : 'No agent'}</strong><span>LIMITS</span><strong>{runLimit}</strong><span>CREDENTIAL</span><strong>{modelRun ? capabilities?.credential_configured ? 'Z.AI key configured in root .env' : 'Z.AI key missing from root .env' : 'Not used'}</strong><span>STATUS</span><strong>{form.experiment === '2B' && form.mode === 'connectivity' ? 'Generic fixture · engineering check' : form.mode === 'pilot' ? '2A engineering pilot' : 'Engineering check'}</strong></div>
+      <button className="primary-button launch-button" disabled={launching || modelRun && !capabilities?.credential_configured || form.experiment === '2B' && (!form.seed || form.mode === 'deterministic' && (form.branching_factor < 1 || form.branching_factor > 15))} onClick={launch}>{launching ? 'Starting…' : 'Run experiment'} <span>→</span></button>
     </section></div>}
   </div>
 }

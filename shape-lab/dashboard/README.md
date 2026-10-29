@@ -1,35 +1,44 @@
-# Local SHAPE console: first slice
+# Local SHAPE console
 
 This local UI has an index page for 2A and 2B, archived-run viewing, live
-decoy events, a separate agent activity pane for archived agent traces, and a
-button to launch **model-free deterministic fixture checks**. It does not yet
-launch 2A connectivity/pilot or any 2B agent run. Every UI-created fixture is
-marked as an engineering check, not an experimental result.
+agent and decoy events, and allowlisted launch controls. It offers 2A C2 pilot,
+2A connectivity, 2B B0 connectivity, and model-free deterministic checks.
+The 2B connectivity run uses generic fixture content and is an engineering
+check; the final 2B B0–B3 study remains pending its synthetic story.
 
 ## Start
 
-Use Python 3.12 and Node.js 20.19+ or 22.12+ from `shape-lab/`:
+From the repository root, put a nonempty `ZAI_API_KEY` in `.env`, then run:
 
 ```sh
-uv venv .venv --python 3.12
-uv pip install --python .venv/bin/python -r requirements-dashboard.txt
-cd dashboard_ui
-npm ci
-npm run build
-cd ..
-.venv/bin/uvicorn dashboard.app:app --host 127.0.0.1 --port 8787
+make up
 ```
 
-Open <http://127.0.0.1:8787/>. The UI and launch API are loopback-only. A
-browser launch uses a local session token stored under ignored `runs/`; no
-provider key is sent to the browser. Node.js is only needed to build or edit
-the frontend. For development, run `npm run dev` in `dashboard_ui/`; its API
-proxy points at the local Python server.
+This installs dashboard dependencies, builds the frontend and both sets of
+Docker images, and starts the host-side dashboard in the background. It does
+not start an agent or call a model until you launch a model-backed run in the
+UI. Open <http://127.0.0.1:8787/>. Use `make status` to check the server and
+`make down` to stop the dashboard. Active trial workers continue to their
+controller cap if the dashboard is stopped. Logs and the service PID live in
+ignored `shape-lab/runs/.dashboard-service/`.
 
-Select 2A or 2B, choose an arm, and click **Run experiment**. The default
-reuses already-built Docker images; select **Build images** if the images are
-missing or need refreshing. 2B also accepts a validated fixture seed and
-branching factor. One dashboard job runs at a time.
+The UI and launch API are loopback-only. A browser launch uses a local session
+token stored under ignored `runs/`; no provider key is sent to the browser.
+Node.js is needed only to build or edit the frontend. For development, run
+`npm run dev` in `dashboard_ui/`; its API proxy points at the local Python
+server.
+
+Select 2A or 2B, choose an available mode and arm, review the effective caps,
+and click **Run experiment**. The default reuses images built by `make up`;
+select **Rebuild Docker images** after changing image sources. 2B accepts a
+validated fixture seed, and deterministic checks accept a branching factor.
+The 2A pilot uses C2 only; 2B connectivity uses B0 only. One dashboard job
+runs at a time.
+
+The root `.env` supplies the Z.AI key to a temporary gateway-only secret file
+when a model-backed run begins. Agent model, effort, task, and caps come from
+the pinned `config/agent_2a_task.json` and `config/agent_2b_task.json` files;
+the UI displays them but does not accept arbitrary environment overrides.
 
 The run page appears immediately, including before the controller creates its
 run directory. During execution the controllers mirror decoy logs to
@@ -51,13 +60,12 @@ for 2A or first virtual filesystem interaction for 2B.
   tool results, and structured events for archived agent runs. PentestGPT
   omits private reasoning content, and the UI labels that omission.
 - Selecting an agent action may show nearby server activity, explicitly marked
-  **time-correlated**. Exact 2A/2B tool-to-server interaction IDs and the
-  launch controls for real-agent modes are later slices.
+  **time-correlated**. Exact 2A/2B tool-to-server interaction IDs are a later
+  slice.
 - The local dashboard does not alter trial prompts, treatments, or caps.
 
-Run the checks with:
+Run the checks from the repository root with:
 
 ```sh
-.venv/bin/python -m unittest discover -s tests -v
-cd dashboard_ui && npm run build
+make check
 ```

@@ -1,4 +1,4 @@
-"""Launch one model-free fixture check from the local operator console."""
+"""Launch one allowlisted SHAPE run from the local operator console."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 import threading
 from typing import Any
 
-from .core import FixtureRequest, JOBS, RUNS, job_status, private_json, utc_now
+from .core import RunRequest, JOBS, RUNS, job_status, private_json, utc_now
 
 
 _launch_lock = threading.Lock()
@@ -44,12 +44,15 @@ def _active_job() -> str | None:
     return None
 
 
-def launch_fixture(request: FixtureRequest) -> dict[str, Any]:
+def launch_run(request: RunRequest) -> dict[str, Any]:
     with _launch_lock:
         active = _active_job()
         if active:
             raise RuntimeError(f"Another dashboard run is active: {active}")
-        prefix = "2a-dete" if request.experiment == "2A" else "2b-dete"
+        if request.mode != "deterministic":
+            from experiment_controller.run_2a import read_key
+            read_key()
+        prefix = ("2a" if request.experiment == "2A" else "2b") + "-" + request.mode[:4]
         run_id = f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"
         folder = JOBS / run_id
         folder.mkdir(parents=True, mode=0o700)
@@ -57,6 +60,8 @@ def launch_fixture(request: FixtureRequest) -> dict[str, Any]:
         private_json(folder / "status.json", {
             "run_id": run_id, "experiment": request.experiment, "mode": request.mode,
             "arm": request.arm, "status": "queued", "created_utc": utc_now(),
+            "max_wall_seconds": (240 if request.mode == "connectivity" else
+                                 1200 if request.mode == "pilot" else None),
             "pid": None, "error": None,
         })
         descriptor = os.open(folder / "worker.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
