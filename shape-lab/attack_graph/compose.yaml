@@ -1,0 +1,56 @@
+name: bugcamp-attack-graph
+
+services:
+  neo4j:
+    image: neo4j:2026.10.1
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - graph_net
+    restart: unless-stopped
+
+  api:
+    image: bugcamp-attack-graph-api:dev
+    build: .
+    environment:
+      <<: &graph_environment
+        NEO4J_URI: bolt://neo4j:7687
+        NEO4J_USER: neo4j
+        NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
+        GRAPH_SCAN_ID: bc1f19bf-7806-405d-a51d-85fce50bb5e6
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      OLLAMA_CHAT_URL: ${OLLAMA_CHAT_URL:-https://ollama.com/v1/chat/completions}
+      THREAT_MODEL_EXTERNAL_EXPORT_ALLOWED: ${THREAT_MODEL_EXTERNAL_EXPORT_ALLOWED:-false}
+    volumes:
+      - ../attack_graph_ui/dist:/app/ui:ro
+    ports:
+      - "127.0.0.1:8791:8791"
+    depends_on:
+      - neo4j
+    networks:
+      - graph_net
+    restart: unless-stopped
+
+  importer:
+    image: bugcamp-attack-graph-api:dev
+    build: .
+    profiles: [import]
+    user: "${GRAPH_IMPORT_UID:-1000}:${GRAPH_IMPORT_GID:-1000}"
+    environment: *graph_environment
+    command: ["python", "importer.py"]
+    volumes:
+      - ./snapshot.json:/data/graph.json:ro
+      - ../BUGCAMP_CRAWL/bugcamp.io_443.sql:/data/bugcamp.io_443.sql:ro
+    depends_on:
+      - neo4j
+    networks:
+      - graph_net
+    restart: "no"
+
+volumes:
+  neo4j_data:
+
+networks:
+  graph_net: {}

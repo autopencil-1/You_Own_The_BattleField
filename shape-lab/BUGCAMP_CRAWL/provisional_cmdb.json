@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "scope": "bugcamp.io:443",
+  "path_policy": {
+    "target_scope": "all_assets",
+    "defense_priority": "not_yet_supplied",
+    "attack_steps_required": true
+  },
+  "source_scan_id": "bc1f19bf-7806-405d-a51d-85fce50bb5e6",
+  "sources": {
+    "crawl_observed": "bugcamp.io_443.sql; collection timestamp 2026-10-30 04:25:07 KST",
+    "analyst_asserted": "User-supplied sanitized topology and rule sketch, 2026-10-31",
+    "user_confirmed": "User confirmation in this conversation, 2026-10-31 and 2026-11-01; independent configuration export not supplied",
+    "analyst_inferred": "User-provided 2026-11-01 access and ownership interpretation from code; enforcement was not independently tested",
+    "synthetic_id": "Deterministic placeholders assigned 2026-11-01 for graph joins; these are not AWS identifiers",
+    "bundle_inferred": "User-supplied analysis of frontend bundles; bundles are not included in this dump"
+  },
+  "evidence_states": [
+    "crawl_observed",
+    "analyst_asserted",
+    "user_confirmed",
+    "analyst_inferred",
+    "bundle_inferred",
+    "candidate",
+    "unknown"
+  ],
+  "nodes": [
+    {
+      "id": "origin:bugcamp.io:443",
+      "kind": "WebOrigin",
+      "name": "bugcamp.io:443",
+      "visibility": "external",
+      "published_port": 443,
+      "evidence_state": "crawl_observed"
+    },
+    {
+      "id": "ip:43.200.49.16",
+      "kind": "IPAddress",
+      "address": "43.200.49.16",
+      "visibility": "external",
+      "published_port": 443,
+      "evidence_state": "crawl_observed"
+    },
+    {
+      "id": "ip:3.37.226.238",
+      "kind": "IPAddress",
+      "address": "3.37.226.238",
+      "visibility": "external",
+      "published_port": 443,
+      "evidence_state": "crawl_observed"
+    },
+    {
+      "id": "alb:bugcamp-main",
+      "kind": "ApplicationLoadBalancer",
+      "name": "bugcamp main ALB",
+      "visibility": "internal",
+      "evidence_state": "analyst_asserted",
+      "asset_id": "synthetic:aws:alb:bugcamp-main",
+      "asset_id_provenance": "synthetic",
+      "region": "ap-northeast-2",
+      "listener_protocol": "HTTPS",
+      "listener_port": 443,
+      "tls_termination": "analyst_asserted",
+      "ssl_policy": null,
+      "certificate_id": null
+    },
+    {
+      "id": "tg:bugcamp-web",
+      "kind": "TargetGroup",
+      "name": "web_tg",
+      "role": "Nuxt SSR",
+      "visibility": "internal",
+      "evidence_state": "user_confirmed",
+      "asset_id": "synthetic:aws:target-group:bugcamp-web",
+      "asset_id_provenance": "synthetic",
+      "target_type": "ip",
+      "protocol": "HTTP",
+      "port": 80,
+      "health_check_path": "/",
+      "externally_reachable_via": "origin:bugcamp.io:443"
+    },
+    {
+      "id": "tg:bugcamp-api",
+      "kind": "TargetGroup",
+      "name": "api_tg",
+      "role": "Express API",
+      "visibility": "internal",
+      "evidence_state": "user_confirmed",
+      "asset_id": "synthetic:aws:target-group:bugcamp-api",
+      "asset_id_provenance": "synthetic",
+      "target_type": "ip",
+      "protocol": "HTTP",
+      "port": 3000,
+      "health_check_path": "/api",
+      "externally_reachable_via": "origin:bugcamp.io:443"
+    },
+    {
+      "id": "app:bugcamp-nuxt",
+      "kind": "Application",
+      "name": "Nuxt SSR",
+      "visibility": "internal",
+      "evidence_state": "analyst_asserted",
+      "asset_id": "synthetic:backend-target:bugcamp-web-representative",
+      "asset_id_provenance": "synthetic",
+      "backend_target_count": null,
+      "runtime": "Node.js",
+      "framework": "Nuxt 2",
+      "externally_reachable_via": "origin:bugcamp.io:443",
+      "library_versions_from_bundle": {
+        "Vue": "2.7",
+        "vue-router": "3.5.4",
+        "Vuex": "3.6.2",
+        "vue-i18n": "8.27.2",
+        "axios": "0.21.4",
+        "core-js": "3.23.5"
+      },
+      "ssr_ticket_json_embedding": "analyst_asserted"
+    },
+    {
+      "id": "app:bugcamp-api",
+      "kind": "Application",
+      "name": "Express API",
+      "visibility": "internal",
+      "evidence_state": "analyst_asserted",
+      "asset_id": "synthetic:backend-target:bugcamp-api-representative",
+      "asset_id_provenance": "synthetic",
+      "backend_target_count": null,
+      "runtime": "Node.js",
+      "framework": "Express",
+      "api_prefix": "/api",
+      "externally_reachable_via": "origin:bugcamp.io:443",
+      "middleware_evidence_state": "user_confirmed",
+      "middleware": ["express-session", "compression", "multer"]
+    },
+    {
+      "id": "host:static.bugcamp.io",
+      "kind": "ReferencedHost",
+      "name": "static.bugcamp.io",
+      "visibility": "external",
+      "evidence_state": "user_confirmed",
+      "scan_state": "unscanned",
+      "asset_id": "synthetic:aws:cloudfront:bugcamp-static",
+      "asset_id_provenance": "synthetic",
+      "backing_service": "Amazon CloudFront",
+      "origin_service": "Amazon S3"
+    }
+  ],
+  "edges": [
+    {
+      "from": "origin:bugcamp.io:443",
+      "to": "ip:43.200.49.16",
+      "kind": "OBSERVED_ON",
+      "evidence_state": "crawl_observed"
+    },
+    {
+      "from": "origin:bugcamp.io:443",
+      "to": "ip:3.37.226.238",
+      "kind": "OBSERVED_ON",
+      "evidence_state": "crawl_observed"
+    },
+    {
+      "from": "ip:43.200.49.16",
+      "to": "alb:bugcamp-main",
+      "kind": "ASSERTED_ALB_NODE_IP",
+      "evidence_state": "analyst_asserted"
+    },
+    {
+      "from": "ip:3.37.226.238",
+      "to": "alb:bugcamp-main",
+      "kind": "ASSERTED_ALB_NODE_IP",
+      "evidence_state": "analyst_asserted"
+    },
+    {
+      "from": "alb:bugcamp-main",
+      "to": "tg:bugcamp-api",
+      "kind": "ROUTES_TO",
+      "host_pattern": "bugcamp.io",
+      "path_pattern": "/api/*",
+      "priority": 10,
+      "url_rewrite": "none",
+      "url_rewrite_evidence_state": "user_confirmed",
+      "evidence_state": "analyst_asserted",
+      "config_export_verified": false
+    },
+    {
+      "from": "alb:bugcamp-main",
+      "to": "tg:bugcamp-web",
+      "kind": "ROUTES_TO",
+      "path_pattern": "default",
+      "evidence_state": "analyst_asserted",
+      "config_export_verified": false
+    },
+    {
+      "from": "tg:bugcamp-web",
+      "to": "app:bugcamp-nuxt",
+      "kind": "TARGETS",
+      "evidence_state": "analyst_asserted"
+    },
+    {
+      "from": "tg:bugcamp-api",
+      "to": "app:bugcamp-api",
+      "kind": "TARGETS",
+      "evidence_state": "analyst_asserted"
+    },
+    {
+      "from": "app:bugcamp-nuxt",
+      "to": "origin:bugcamp.io:443",
+      "kind": "CALLS_API_VIA_PUBLIC_ORIGIN",
+      "path_prefix": "/api",
+      "forwards_client_cookie": true,
+      "evidence_state": "user_confirmed",
+      "runtime_path_verified": false
+    },
+    {
+      "from": "app:bugcamp-nuxt",
+      "to": "host:static.bugcamp.io",
+      "kind": "REFERENCES_HOST",
+      "evidence_state": "user_confirmed"
+    }
+  ],
+  "logical_store_connections": [
+    {
+      "id": "store-role:relational-db",
+      "from": "app:bugcamp-api",
+      "role": "relational database",
+      "relationship": "QUERIES_DATABASE",
+      "direction": "API_TO_STORE",
+      "connection_state": "analyst_asserted",
+      "asset_identity": "synthetic:aws:rds:bugcamp-main",
+      "asset_id_provenance": "synthetic",
+      "technology": "MySQL 8",
+      "deployment": "Amazon RDS for MySQL",
+      "port": 3306,
+      "status": "RDS MySQL 8 confirmed by user; AWS resource ID represented by a synthetic placeholder"
+    },
+    {
+      "id": "store-role:session",
+      "from": "app:bugcamp-api",
+      "role": "session backing store",
+      "relationship": "USES_SESSION_STORE",
+      "direction": "API_TO_STORE",
+      "connection_state": "analyst_asserted",
+      "asset_identity": "synthetic:aws:rds:bugcamp-main",
+      "asset_id_provenance": "synthetic",
+      "technology": "MySQL session table",
+      "port": 3306,
+      "database_instance_ref": "store-role:relational-db",
+      "status": "MySQL session table in the same RDS instance, confirmed by user; AWS resource ID represented by a synthetic placeholder"
+    },
+    {
+      "id": "store-role:ticket-files",
+      "from": "app:bugcamp-api",
+      "role": "ticket attachment store",
+      "relationship": "READS_TICKET_FILES",
+      "direction": "API_TO_STORE",
+      "connection_state": "analyst_asserted",
+      "asset_identity": "synthetic:aws:efs:bugcamp-ticket-files",
+      "asset_id_provenance": "synthetic",
+      "technology": "Amazon EFS",
+      "port": 2049,
+      "authorization": "varies with ticket disclosure and session state",
+      "status": "Amazon EFS confirmed by user; EFS ID is synthetic and ticket access depends on disclosure and ownership"
+    },
+    {
+      "id": "store-role:public-uploads",
+      "from": "app:bugcamp-api",
+      "role": "public upload store",
+      "relationship": "WRITES_PUBLIC_UPLOADS",
+      "direction": "API_TO_STORE",
+      "connection_state": "analyst_asserted",
+      "asset_identity": "synthetic:aws:s3:bugcamp-public-uploads",
+      "asset_id_provenance": "synthetic",
+      "technology": "Amazon S3",
+      "port": 443,
+      "published_via": "host:static.bugcamp.io",
+      "status": "S3 upload destination and CloudFront serving path confirmed by user; bucket ID is synthetic"
+    }
+  ],
+  "network_policy": {
+    "id": "network:allow-any-ip",
+    "source_scope": "any_ip",
+    "effect": "allow",
+    "direction": "inbound",
+    "scope": "all_modeled_services",
+    "evidence_state": "user_confirmed",
+    "note": "No source-IP filtering in this benchmark assumption. Network reachability does not grant an application session, object access, or S3 data permission."
+  },
+  "network_exposures": [
+    {"to": "alb:bugcamp-main", "protocol": "TCP", "service": "HTTPS", "port": 443},
+    {"to": "app:bugcamp-nuxt", "protocol": "TCP", "service": "HTTP", "port": 80},
+    {"to": "app:bugcamp-api", "protocol": "TCP", "service": "HTTP", "port": 3000},
+    {"to": "store-role:relational-db", "protocol": "TCP", "service": "MySQL", "port": 3306},
+    {"to": "store-role:ticket-files", "protocol": "TCP", "service": "NFS", "port": 2049},
+    {"to": "store-role:public-uploads", "protocol": "TCP", "service": "HTTPS", "port": 443},
+    {"to": "host:static.bugcamp.io", "protocol": "TCP", "service": "HTTPS", "port": 443}
+  ],
+  "principals": [
+    {"id": "REPORTER", "name": "Researcher / hacker", "role_token": "REPORTER", "persona": "hackerMenu", "scope": "Submits and owns tickets", "evidence_state": "analyst_asserted"},
+    {"id": "MANAGER", "name": "Company manager", "role_token": "MANAGER", "persona": "companyMenu; manager-only", "scope": "Owns programs, triages company tickets, and manages company wallet", "evidence_state": "analyst_asserted"},
+    {"id": "CREW", "name": "Crew member", "role_token": "CREW", "persona": "Crew pages", "scope": "Shares crew tickets and wallet by membership", "evidence_state": "analyst_asserted"},
+    {"id": "STAFF", "name": "Platform staff", "role_token": null, "code_marker": "isStaff on activities", "persona": null, "scope": "Internal triage and mediation; no self-serve persona", "evidence_state": "analyst_asserted"},
+    {"id": "ADMIN_ACCOUNT", "name": "admin account", "role_token": null, "code_marker": "username admin", "persona": null, "scope": "Privileged account; staff/superuser mapping is unverified and grants are not assumed", "evidence_state": "analyst_inferred"}
+  ],
+  "ownership_rules": [
+    {"id": "ticket", "resource": "Ticket", "owners": ["REPORTER", "MANAGER", "CREW", "STAFF"], "condition": "Reporter participant, program company, assigned crew, or staff; exact operation differs by route", "public_read": "FULLY_DISCLOSED grants full public read; LIMITED_DISCLOSED grants partial public read; private state remains scoped", "evidence_state": "analyst_inferred"},
+    {"id": "program", "resource": "Program", "owners": ["MANAGER"], "condition": "Owning company; invited or participating REPORTER may access scoped private programs", "public_read": "PUBLIC world-readable; PRIVATE, PRIVATE_EVENT, and PRIVATE_CHALLENGE restricted", "evidence_state": "analyst_inferred"},
+    {"id": "attachment", "resource": "Attachment", "owners": ["REPORTER", "MANAGER", "CREW", "STAFF"], "condition": "Inherits its ticket ACL", "public_read": "Disclosed-ticket files observed without authentication; partial disclosure may restrict content", "evidence_state": "analyst_inferred"},
+    {"id": "wallet", "resource": "Wallet / credit / contracts", "owners": ["REPORTER", "CREW", "MANAGER"], "condition": "User wallet=self; crew wallet=crew member; company wallet=owning manager", "public_read": "none", "evidence_state": "analyst_inferred"},
+    {"id": "notification", "resource": "Notification", "owners": ["REPORTER", "MANAGER", "CREW"], "condition": "Authenticated self only", "public_read": "none", "evidence_state": "analyst_inferred"},
+    {"id": "session", "resource": "Session", "owners": ["REPORTER", "MANAGER", "CREW"], "condition": "Authenticated self only", "public_read": "none", "evidence_state": "analyst_inferred"}
+  ],
+  "access_rules": [
+    {"id": "public-pages", "area": "Public pages", "tier": "web", "patterns": ["/", "/en", "/sign-in", "/sign-up", "/reset-password", "/terms", "/contact-us", "/disclosure-guidelines"], "observed": "Unauthenticated OK", "required_principals": [], "required_session": false, "condition": "Public", "enforcement_point": "public", "evidence_state": "crawl_observed"},
+    {"id": "public-listings", "area": "Public listings", "tier": "web", "patterns": ["/hacktivity", "/programs", "/programs/:id", "/companies/:alias", "/@nickname"], "observed": "Unauthenticated OK for public records", "required_principals": [], "required_session": false, "condition": "Visibility flag permits public listing", "enforcement_point": "visibility flag", "evidence_state": "analyst_inferred"},
+    {"id": "disclosed-ticket-read", "area": "Disclosed ticket read", "tier": "api", "patterns": ["GET /api/tickets/:id", "GET /api/tickets/:id/attachment/:n"], "observed": "Unauthenticated OK for disclosed tickets", "required_principals": [], "required_session": false, "condition": "FULLY_DISCLOSED=full public read; LIMITED_DISCLOSED=partial public read", "enforcement_point": "disclosure flag", "evidence_state": "analyst_inferred"},
+    {"id": "private-ticket-read", "area": "Private ticket read", "tier": "api", "patterns": ["GET /api/tickets/:id", "GET /api/tickets/:id/attachment/:n"], "observed": "Private state not reached in crawl", "required_principals": ["REPORTER", "MANAGER", "CREW", "STAFF"], "required_session": true, "condition": "Ticket participant, owning company, assigned crew, or staff; attachment inherits ticket ACL", "enforcement_point": "object ownership and disclosure", "evidence_state": "analyst_inferred"},
+    {"id": "public-profile-events", "area": "Profiles and events", "tier": "api", "patterns": ["GET /api/users/:nickname", "GET /api/events"], "observed": "Unauthenticated OK reported; /api/users/admin crawl row was untested", "required_principals": [], "required_session": false, "condition": "Public profile or event list", "enforcement_point": "public", "evidence_state": "analyst_inferred"},
+    {"id": "self-pages", "area": "Self pages", "tier": "web", "patterns": ["/settings*", "/profile", "/followings"], "observed": "302 to /sign-in", "required_principals": [], "required_session": true, "condition": "Authenticated self", "enforcement_point": "route middleware and self scope", "evidence_state": "analyst_inferred"},
+    {"id": "self-api", "area": "Self API", "tier": "api", "patterns": ["GET /api/auth", "GET /api/auth/logout", "GET /api/notifications"], "observed": "401 without session", "required_principals": [], "required_session": true, "condition": "Authenticated self", "enforcement_point": "session middleware", "evidence_state": "analyst_inferred"},
+    {"id": "manager-area", "area": "Manager area", "tier": "mixed", "patterns": ["/management/*", "/manager-only", "/api/companies/wallet", "/api/contracts/*", "/api/companies/application"], "observed": "Not probed; gated in UI", "required_principals": ["MANAGER"], "required_session": true, "condition": "Company manager", "enforcement_point": "role check", "evidence_state": "analyst_inferred"},
+    {"id": "program-management", "area": "Program management", "tier": "web", "patterns": ["/programs/new", "/programs/:id/edit"], "observed": "Gated in UI", "required_principals": ["MANAGER"], "required_session": true, "condition": "Manager owns program", "enforcement_point": "role and object ownership", "evidence_state": "analyst_inferred"},
+    {"id": "program-ticket-create", "area": "Program ticket creation", "tier": "web", "patterns": ["/programs/:id/new-ticket"], "observed": "Gated in UI", "required_principals": ["REPORTER"], "required_session": true, "condition": "Researcher participates in program", "enforcement_point": "participation check", "evidence_state": "analyst_inferred"},
+    {"id": "ticket-mutation", "area": "Ticket changes", "tier": "mixed", "patterns": ["/tickets/:id/edit", "POST /api/tickets/:id/activities", "PATCH /api/tickets/:id"], "observed": "Gated in UI", "required_principals": ["REPORTER", "MANAGER", "STAFF"], "required_session": true, "condition": "Ticket reporter, owning company, or staff", "enforcement_point": "object ownership", "evidence_state": "analyst_inferred"},
+    {"id": "crew-area", "area": "Crew area", "tier": "mixed", "patterns": ["/crews/:name", "/api/crews/:name/wallet", "/api/tickets/crew"], "observed": "Gated in UI", "required_principals": ["CREW"], "required_session": true, "condition": "Membership in named crew", "enforcement_point": "membership check", "evidence_state": "analyst_inferred"}
+  ],
+  "api_route_catalog": [
+    {
+      "area": "Session",
+      "routes": ["GET /api/auth", "POST /api/auth/login", "/api/auth/join", "GET /api/auth/logout", "/api/auth/reset", "/api/auth/email-verify", "/api/auth/email-verify/:code"],
+      "purpose": "Current user, login, signup, logout, password reset, and email verification",
+      "auth_note": "/api/auth and /api/auth/logout returned 401 in analyst observations; remaining access rules need confirmation",
+      "detail": "The analyst reports browser-side SHA-256 transformation of the password before submission."
+    },
+    {
+      "area": "Identity and KYC",
+      "routes": ["POST /api/auth/nda"],
+      "purpose": "Starts NICE CheckPlus phone identity flow",
+      "auth_note": "Logged-in requirement confirmed by user"
+    },
+    {
+      "area": "Notifications",
+      "routes": ["GET /api/notifications", "PATCH /api/notifications/:id/read"],
+      "purpose": "Per-user ticket and program alerts",
+      "auth_note": "GET returned 401 in analyst observation"
+    },
+    {
+      "area": "Programs",
+      "routes": ["/api/programs", "/api/programs/:id", "POST /api/programs/:id/participants", "PATCH /api/programs/:id/participants", "/api/programs/participating", "/api/programs/companies/:alias", "/api/participants/:id"],
+      "purpose": "Bounty programs, invitations, participation, and approvals",
+      "auth_note": "Mixed public and role-specific access; exact rules unknown"
+    },
+    {
+      "area": "Events",
+      "routes": ["/api/events", "/api/events/:id", "/api/events/:id/participants", "/api/companies/events"],
+      "purpose": "Time-limited bounty campaigns",
+      "auth_note": "/api/events was reported public and empty; other rules unknown"
+    },
+    {
+      "area": "Tickets",
+      "routes": ["/api/tickets", "/api/tickets/:id", "PATCH /api/tickets/:id", "GET /api/tickets/:id/activities", "POST /api/tickets/:id/activities", "/api/tickets/users", "/api/tickets/companies", "/api/tickets/crew", "/api/tickets/paid", "/api/tickets/rewarded"],
+      "purpose": "Vulnerability reports, comments, state changes, disclosure, and reward workflow",
+      "auth_note": "Disclosed tickets observed public; private and role-specific conditions unknown",
+      "detail": "Activities reportedly include type, from/to state, reward, disclosed, and isStaff."
+    },
+    {
+      "area": "Attachments",
+      "routes": ["GET /api/tickets/:id/attachment/:n"],
+      "purpose": "Download report evidence",
+      "auth_note": "Disclosed-ticket attachments observed public; private-ticket condition unknown"
+    },
+    {
+      "area": "People",
+      "routes": ["/api/users/:nickname", "/api/users/duplicate", "/api/crews", "/api/crews/:name", "/api/followings", "/api/:target/following"],
+      "purpose": "Profiles, crews, and follows",
+      "auth_note": "/api/users/admin has a folded, untested crawl row; public access claim is not verified by this dump"
+    },
+    {
+      "area": "Companies",
+      "routes": ["/api/companies", "/api/companies/:alias", "/api/companies/application", "/api/companies/assets"],
+      "purpose": "Company profiles, onboarding, and in-scope assets",
+      "auth_note": "Mixed access; exact rules unknown"
+    },
+    {
+      "area": "Money",
+      "routes": ["/api/auth/wallet", "/api/crews/:name/wallet", "/api/companies/wallet", "/api/contracts/deposit", "/api/contracts/adjustments"],
+      "purpose": "Reward balances, deposits, and settlements",
+      "auth_note": "Logged-in requirement confirmed by user; role and ownership rules unknown"
+    },
+    {
+      "area": "Content",
+      "routes": ["/api/terms?type=", "/api/support/feedbacks", "/api/careers", "POST /api/file"],
+      "purpose": "Legal text, support, careers, and editor uploads",
+      "auth_note": "Mixed access; upload authorization unknown"
+    }
+  ],
+  "third_party_references": [
+    "NICE CheckPlus",
+    "Gravatar",
+    "hCaptcha",
+    "Google Analytics",
+    "v-md-editor 1.7.11"
+  ],
+  "excluded_from_target_cmdb": [
+    "gs://asm-gcs-dev screenshot_path values belong to the ASM collector"
+  ]
+}

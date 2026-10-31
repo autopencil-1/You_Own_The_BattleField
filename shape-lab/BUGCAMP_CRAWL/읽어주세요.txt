@@ -1,0 +1,20 @@
+bugcamp.io:443 DB 덤프
+
+현재 dev 크롤맵에 표시된 회차의 bugcamp.io:443 데이터만 포함합니다.
+수집 결과 생성 시각: 한국 시간 2026-10-30 04:25:07
+
+bugcamp.io_443.sql 안에 아래 6개 테이블의 구조와 데이터가 함께 있습니다.
+- service_information: 서비스 정보 2행
+- webapp_information_endpoint: 엔드포인트 결과 522행
+- endpoint_crawl_edge: URL 발견 관계 9,854행
+- endpoint_crawl_edge_capped: 저장 상한 기록 0행
+- endpoint_crawl_map: 크롤맵 문서 1행
+- endpoint_finding: 주요 엔드포인트 발견 4행
+
+복원 예:
+psql -v ON_ERROR_STOP=1 -d 분석용DB -f bugcamp.io_443.sql
+
+별도 bugcamp_crawl 스키마를 생성합니다. 이미 같은 이름의 스키마가 있는 DB에서는 그대로 실행하지 마세요.
+원래 스키마의 인덱스·제약조건·권한·시퀀스는 포함하지 않습니다.
+PostgreSQL 15에 실제 복원해 건수가 일치함을 확인한 SQL입니다.
+HTTP 응답 본문 등 GCS 수집 파일은 이 DB 덤프에 포함하지 않습니다.
