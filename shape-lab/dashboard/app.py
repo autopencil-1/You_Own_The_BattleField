@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .core import (RunRequest, JOBS, UI_DIST, capabilities, collector,
-                   job_status, list_runs, provisional_snapshot, raw_event_record,
+                   job_status, list_runs, materialization_page, provisional_snapshot, raw_event_record,
                    run_path, run_snapshot)
 from .jobs import launch_run
 
@@ -147,6 +147,18 @@ async def raw_event(run_id: str, event_id: int) -> dict:
         return raw_event_record(run_id, event_id)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(404, "Raw event unavailable") from exc
+
+
+@app.get("/api/runs/{run_id}/materializations")
+async def materializations(run_id: str, after: int = 0, limit: int = 100) -> dict:
+    if after < 0 or not 1 <= limit <= 200:
+        raise HTTPException(422, "Invalid materialization range")
+    try:
+        return materialization_page(run_id, after=after, limit=limit)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Materialization archive unavailable") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 def _checked_run(run_id: str) -> str:

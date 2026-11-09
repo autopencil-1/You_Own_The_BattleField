@@ -18,6 +18,8 @@ type RunRow = {
   finished_utc: string | null
   termination_reason: string | null
   experimental_result: boolean
+  pilot_protocol?: string | null
+  slot?: number | null
 }
 type EventRow = {
   event_id: number
@@ -51,7 +53,32 @@ type Snapshot = {
   event_count: number
   score: Record<string, unknown> | null
   job: Record<string, unknown>
+  pilot_id?: string | null
+  pilot_protocol?: string | null
+  slot?: number | null
+  block?: number | null
+  attempt_classification?: 'infrastructure_invalid' | 'controller_review' | null
+  provider_credits_estimated?: string | null
+  provider_settlement_state?: string | null
+  progress?: PathStoryProgress | null
 }
+type PathStoryProgress = {
+  phase?: string | null
+  observed_utc?: string | null
+  pre_entry_elapsed_seconds?: number | null
+  post_entry_elapsed_seconds?: number | null
+  pre_entry_wall_seconds?: number | null
+  post_entry_wall_seconds?: number | null
+  qualified_entry_utc?: string | null
+  filesystem_actions?: number | null
+  materialized_nodes?: number | null
+  agent_tool_calls?: number | null
+  model_calls?: number | null
+  model_tokens?: number | null
+  selected_reason?: string | null
+}
+type Materialization = { inventory_index: number; path: string; node_sha256: string; response_sequence: number }
+type MaterializationPage = { items: Materialization[]; total: number; has_more: boolean; next_after: number; verified: boolean; available: boolean }
 type FormState = {
   experiment: Experiment
   mode: RunMode
@@ -92,6 +119,16 @@ function elapsed(start: string | null, end: string | null, now: number): string 
   return `${String(minutes).padStart(2, '0')}:${String(amount % 60).padStart(2, '0')}`
 }
 
+function durationSeconds(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  const amount = Math.max(0, Math.floor(value))
+  return `${String(Math.floor(amount / 60)).padStart(2, '0')}:${String(amount % 60).padStart(2, '0')}`
+}
+
+function phaseName(value: string | null | undefined): string {
+  return value ? value.replaceAll('_', ' ') : 'Waiting for monitor'
+}
+
 function textOf(value: unknown): string {
   if (typeof value === 'string') return value
   if (value == null) return ''
@@ -112,12 +149,17 @@ function eventTitle(event: EventRow): string {
     if (d.name === 'StructuredOutput') return event.role === 'supervisor' ? 'Supervisor plan' : 'Executor report'
     const input = d.input && typeof d.input === 'object' ? d.input as Record<string, unknown> : null
     const command = input?.command
-    return `${String(d.name || 'Tool')}${typeof command === 'string' ? ` · ${command.slice(0, 110)}` : ''}`
+    const name = d.name === 'mcp__shape_ssh__ssh_exec' ? 'SSH command' : d.name === 'mcp__shape_ssh__ssh_connect' ? 'SSH connect' : String(d.name || 'Tool')
+    return `${name}${typeof command === 'string' ? ` · ${command.slice(0, 110)}` : ''}`
   }
   if (event.kind === 'tool_result') return `Tool result · ${event.call_id || 'unpaired'}`
   if (event.kind === 'assistant_text') return 'Agent commentary'
   if (event.kind === 'reasoning') return 'Reasoning content omitted by trace'
   if (event.kind === 'filesystem_interaction') return `${String(d.action || 'command')} · ${String(d.command || '')}`
+  if (event.kind === 'filesystem_materialized') return `Path generated · ${String(d.path || '')}`
+  if (event.kind === 'reinforcement_delivered') return 'Filesystem cue delivered'
+  if (event.kind === 'path_story_profile_loaded') return 'Filesystem profile loaded'
+  if (event.kind === 'ssh_connected') return 'SSH session connected'
   if (event.kind === 'decoy_request') return `${String(d.method || 'SSH')} ${String(d.route || '')}`
   if (event.kind === 'decoy_response') return `Server response · ${String(d.status || '')}`
   if (event.kind === 'auth_session_created') return 'Synthetic session created'
@@ -159,6 +201,10 @@ function eventBody(event: EventRow): string {
   if (event.kind === 'account_access') return `Authenticated: ${String(d.authenticated)}\nHTTP ${String(d.status || '—')}`
   if (event.kind === 'verification_result') return `Valid token: ${String(d.valid)}\nSession active: ${String(d.session_active)}\nCookie reissued: ${String(d.cookie_reissued)}`
   if (event.kind === 'filesystem_interaction') return `cwd ${String(d.cwd_before || '')} → ${String(d.cwd_after || '')}\nexit ${String(d.exit_code ?? '—')}`
+  if (event.kind === 'filesystem_materialized') return `Path: ${String(d.path || '—')}\nInventory index: ${String(d.inventory_index ?? '—')}\nResponse sequence: ${String(d.response_sequence ?? '—')}`
+  if (event.kind === 'reinforcement_delivered') return `After filesystem command ${String(d.command_count ?? '—')}`
+  if (event.kind === 'path_story_profile_loaded') return `Schema: ${String(d.filesystem_schema_version || '—')}\nAuthored nodes: ${String(d.explicit_node_count ?? '—')}`
+  if (event.kind === 'ssh_connected') return `Target: ${String(d.target || '—')}\nInitial directory: ${String(d.cwd || '—')}`
   if (event.kind === 'turn_completed') return textOf(d.structured_output || d.final_text)
   if (event.kind === 'supervisor_rejection') return [
     `Category: ${String(d.failure_kind || '—')}`,
@@ -202,7 +248,7 @@ function eventPreview(event: EventRow): string {
 function mayContactTarget(event: EventRow | null, experiment: Experiment | undefined): boolean {
   if (!event || event.source !== 'agent' || event.kind !== 'tool_call') return false
   const name = String(event.detail.name || '').toLowerCase()
-  return experiment === '2B' ? name === 'ssh_connect' || name === 'ssh_exec' :
+  return experiment === '2B' ? ['ssh_connect', 'ssh_exec', 'mcp__shape_ssh__ssh_connect', 'mcp__shape_ssh__ssh_exec'].includes(name) :
     name === 'bash' || name === 'curl' || name === 'webfetch' || name === 'web_fetch'
 }
 
@@ -247,7 +293,16 @@ function App() {
   const [feedMode, setFeedMode] = useState<'activity' | 'diagnostics'>('activity')
   const [rawDetails, setRawDetails] = useState<Record<number, RawDetail>>({})
   const [now, setNow] = useState(Date.now())
+  const [materializations, setMaterializations] = useState<Materialization[]>([])
+  const [materializationTotal, setMaterializationTotal] = useState(0)
+  const [materializationCursor, setMaterializationCursor] = useState(0)
+  const [materializationAvailable, setMaterializationAvailable] = useState(false)
+  const [materializationVerified, setMaterializationVerified] = useState(false)
+  const [materializationLoading, setMaterializationLoading] = useState(false)
+  const [materializationError, setMaterializationError] = useState<string | null>(null)
   const modalOpen = form !== null
+  const pathStory = snapshot?.run_id === runId && snapshot?.experiment === '2B' &&
+    (snapshot.mode === 'path_story_pilot' || snapshot.pilot_protocol?.startsWith('2b-path-story') === true)
 
   useEffect(() => {
     if (!modalOpen) return
@@ -265,11 +320,23 @@ function App() {
     setSelectedId(null)
     setFeedMode('activity')
     setRawDetails({})
+    setMaterializations([])
+    setMaterializationTotal(0)
+    setMaterializationCursor(0)
+    setMaterializationAvailable(false)
+    setMaterializationVerified(false)
+    setMaterializationError(null)
     setError(null)
   }
 
   useEffect(() => {
-    const onPop = () => { setRunId(new URLSearchParams(window.location.search).get('run')); setSelectedId(null); setRawDetails({}) }
+    const onPop = () => {
+      setRunId(new URLSearchParams(window.location.search).get('run'))
+      setSnapshot(null)
+      setEvents([])
+      setSelectedId(null)
+      setRawDetails({})
+    }
     window.addEventListener('popstate', onPop)
     const clock = window.setInterval(() => setNow(Date.now()), 500)
     return () => { window.removeEventListener('popstate', onPop); window.clearInterval(clock) }
@@ -289,6 +356,23 @@ function App() {
     if (!runId) return
     let alive = true
     let source: EventSource | null = null
+    let queued: EventRow[] = []
+    let flushTimer: number | null = null
+    function flushEvents() {
+      flushTimer = null
+      if (!alive || queued.length === 0) return
+      const batch = queued
+      queued = []
+      setEvents(previous => {
+        const seen = new Set(previous.map(item => item.event_id))
+        const added = batch.filter(item => {
+          if (seen.has(item.event_id)) return false
+          seen.add(item.event_id)
+          return true
+        })
+        return added.length ? [...previous, ...added] : previous
+      })
+    }
     async function load() {
       try {
         const id = runId as string
@@ -308,7 +392,8 @@ function App() {
         source = new EventSource(`/api/runs/${encodeURIComponent(id)}/stream?after=${cursor}`)
         source.addEventListener('run_event', message => {
           const event = JSON.parse((message as MessageEvent).data) as EventRow
-          setEvents(previous => previous.some(item => item.event_id === event.event_id) ? previous : [...previous, event])
+          queued.push(event)
+          if (flushTimer === null) flushTimer = window.setTimeout(flushEvents, 150)
         })
       } catch (err) {
         if (alive) setError(String(err))
@@ -318,8 +403,36 @@ function App() {
     const interval = window.setInterval(() => {
       getJSON<Snapshot>(`/api/runs/${encodeURIComponent(runId)}`).then(state => { if (alive) setSnapshot(state) }).catch(() => {})
     }, 2000)
-    return () => { alive = false; source?.close(); window.clearInterval(interval) }
+    return () => { alive = false; source?.close(); window.clearInterval(interval); if (flushTimer !== null) window.clearTimeout(flushTimer) }
   }, [runId])
+
+  useEffect(() => {
+    setMaterializations([])
+    setMaterializationTotal(0)
+    setMaterializationCursor(0)
+    setMaterializationAvailable(false)
+    setMaterializationVerified(false)
+    setMaterializationError(null)
+    if (!runId || !pathStory) return
+    let alive = true
+    async function refreshFirstPage() {
+      try {
+        const page = await getJSON<MaterializationPage>(`/api/runs/${encodeURIComponent(runId as string)}/materializations?after=0&limit=100`)
+        if (!alive) return
+        setMaterializations(previous => previous.length > 100 ? previous : page.items)
+        setMaterializationCursor(previous => previous > 0 ? previous : page.next_after)
+        setMaterializationTotal(page.total)
+        setMaterializationAvailable(page.available)
+        setMaterializationVerified(page.verified)
+        setMaterializationError(null)
+      } catch (err) {
+        if (alive) setMaterializationError(String(err))
+      }
+    }
+    void refreshFirstPage()
+    const interval = window.setInterval(refreshFirstPage, 5000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [runId, pathStory])
 
   const agentEvents = useMemo(() => events.filter(event =>
     (event.source === 'agent' && !(event.kind === 'raw_event' && event.detail.kind === 'system:thinking_tokens')) || ['agent_started', 'run_outcome'].includes(event.kind)).sort(eventOrder), [events])
@@ -335,17 +448,20 @@ function App() {
   }, [agentEvents])
   const feedItems: FeedItem[] = feedMode === 'activity' ? activityItems : agentEvents.map(event => ({ event }))
   const serverEvents = useMemo(() => events.filter(event => event.source === 'decoy' || event.source === 'gateway').sort(eventOrder), [events])
+  const visibleServerEvents = useMemo(() => pathStory
+    ? serverEvents.filter(event => event.kind !== 'filesystem_materialized')
+    : serverEvents, [serverEvents, pathStory])
   const serverItems = useMemo(() => {
-    const requests = new Map(serverEvents.filter(event => event.kind === 'decoy_request' && typeof event.source_sequence === 'number').map(event => [event.source_sequence, event]))
+    const requests = new Map(visibleServerEvents.filter(event => event.kind === 'decoy_request' && typeof event.source_sequence === 'number').map(event => [event.source_sequence, event]))
     const responses = new Map<number, EventRow>()
-    for (const event of serverEvents) if (event.kind === 'decoy_response' && typeof event.source_sequence === 'number') {
+    for (const event of visibleServerEvents) if (event.kind === 'decoy_response' && typeof event.source_sequence === 'number') {
       const request = requests.get(event.source_sequence - 1)
       if (request && request.detail.route === event.detail.route && request.detail.method === event.detail.method) responses.set(request.event_id, event)
     }
     const pairedResponses = new Set([...responses.values()].map(event => event.event_id))
-    return serverEvents.filter(event => !pairedResponses.has(event.event_id)).map(event => ({ event, response: responses.get(event.event_id) }))
-  }, [serverEvents])
-  const targetEvents = serverEvents.filter(event => event.source === 'decoy')
+    return visibleServerEvents.filter(event => !pairedResponses.has(event.event_id)).map(event => ({ event, response: responses.get(event.event_id) }))
+  }, [visibleServerEvents])
+  const targetEvents = serverEvents.filter(event => event.source === 'decoy' && (!pathStory || event.kind !== 'filesystem_materialized'))
   const picked = events.find(event => event.event_id === selectedId) ?? null
   const targetTool = mayContactTarget(picked, snapshot?.experiment)
   const callStart = picked ? new Date(picked.occurred_utc).getTime() : 0
@@ -358,14 +474,24 @@ function App() {
   }) : []
   const selected = picked?.source === 'agent'
     ? linked.find(event => event.kind === 'decoy_response') ?? linked.at(-1) ?? null
-    : picked ?? serverEvents.at(-1) ?? null
+    : picked ?? visibleServerEvents.at(-1) ?? null
   const selectedServerItem = serverItems.find(item => item.event.event_id === selected?.event_id || item.response?.event_id === selected?.event_id)
   const agentStarted = snapshot?.agent_started_utc ?? null
   const agentStop = snapshot?.status === 'complete' || snapshot?.status === 'failed' ? snapshot.finished_utc : null
   const entryEvent = events.find(event => snapshot?.experiment === '2A' ? event.kind === 'decoy_request' : event.kind === 'filesystem_interaction')
+  const pathProgress = pathStory ? snapshot?.progress : null
+  const entryTime = pathStory ? pathProgress?.qualified_entry_utc ?? null : entryEvent?.occurred_utc ?? null
+  const agentWallLimit = pathStory && typeof pathProgress?.pre_entry_wall_seconds === 'number' && typeof pathProgress?.post_entry_wall_seconds === 'number'
+    ? pathProgress.pre_entry_wall_seconds + pathProgress.post_entry_wall_seconds : snapshot?.max_wall_seconds
+  const trialElapsedSeconds = pathStory && typeof pathProgress?.pre_entry_elapsed_seconds === 'number'
+    ? pathProgress.pre_entry_elapsed_seconds + (pathProgress.post_entry_elapsed_seconds ?? 0) : null
   const agentToolCount = activityItems.filter(item => item.event.kind === 'tool_call').length
-  const serverActions = serverEvents.filter(event => event.kind === (snapshot?.experiment === '2A' ? 'decoy_request' : 'filesystem_interaction')).length
-  const modelCalls = new Set(serverEvents.filter(event => event.kind === 'model_call').map(event => event.detail.call_number)).size
+  const observedActions = serverEvents.filter(event => event.kind === (snapshot?.experiment === '2A' ? 'decoy_request' : 'filesystem_interaction')).length
+  const serverActions = pathStory && typeof pathProgress?.filesystem_actions === 'number' ? pathProgress.filesystem_actions : observedActions
+  const observedModelCalls = new Set(serverEvents.filter(event => event.kind === 'model_call').map(event => event.detail.call_number)).size
+  const modelCalls = pathStory ? Math.max(observedModelCalls, pathProgress?.model_calls ?? 0) : observedModelCalls
+  const materializedNodes = typeof pathProgress?.materialized_nodes === 'number' ? pathProgress.materialized_nodes
+    : materializationAvailable && materializationVerified ? materializationTotal : null
   const rateLimited = serverEvents.some(event => event.kind === 'model_call' && Number(event.detail.status) === 429)
   const plannedKinds = events.filter(event => event.kind === 'state_transition' && event.detail.transition === 'plan_committed')
     .map(event => String((event.detail.task as Record<string, unknown> | undefined)?.kind || ''))
@@ -384,6 +510,13 @@ function App() {
     { label: 'Verified', reached: events.some(event => event.source === 'decoy' && event.kind === 'verification_result' && event.detail.valid === true), active: false },
     { label: 'Canary 2', reached: hasDecoyEvent('canary_hit', 2), active: false },
   ]
+  const pathStoryStages: Array<{ label: string; reached: boolean; pending?: boolean }> = [
+    { label: 'SSH connected', reached: hasDecoyEvent('ssh_connected') },
+    { label: 'Qualified entry', reached: Boolean(pathProgress?.qualified_entry_utc) },
+    { label: 'Filesystem actions', reached: serverActions > 0 },
+    ...(snapshot?.arm === 'B1' || snapshot?.arm === 'B3' ? [{ label: 'Paths generated', reached: materializedNodes !== null && materializedNodes > 0, pending: materializedNodes === null }] : []),
+    { label: 'Filesystem cue', reached: hasDecoyEvent('reinforcement_delivered') },
+  ]
   const modelRun = form?.mode !== 'deterministic'
   const runLimit = form?.mode === 'pilot' || form?.mode === 'engineering' ? '2 hours · 80 tools · 60 model calls · 100M model tokens' :
     form?.mode === 'connectivity' ? '2 hours · 20 tools · 8 model calls · 100M model tokens' : 'No agent or model calls'
@@ -396,6 +529,31 @@ function App() {
     void getJSON<{ record: unknown }>(`/api/runs/${encodeURIComponent(runId)}/events/${eventId}/raw`)
       .then(value => setRawDetails(previous => ({ ...previous, [eventId]: { status: 'ready', record: value.record } })))
       .catch(err => setRawDetails(previous => ({ ...previous, [eventId]: { status: 'error', message: String(err) } })))
+  }
+
+  async function loadMoreMaterializations() {
+    if (!runId || !pathStory || !materializationAvailable || materializationLoading) return
+    setMaterializationLoading(true)
+    setMaterializationError(null)
+    try {
+      const page = await getJSON<MaterializationPage>(`/api/runs/${encodeURIComponent(runId)}/materializations?after=${materializationCursor}&limit=100`)
+      setMaterializations(previous => {
+        const seen = new Set(previous.map(item => item.inventory_index))
+        return [...previous, ...page.items.filter(item => {
+          if (seen.has(item.inventory_index)) return false
+          seen.add(item.inventory_index)
+          return true
+        })]
+      })
+      setMaterializationCursor(page.next_after)
+      setMaterializationTotal(page.total)
+      setMaterializationAvailable(page.available)
+      setMaterializationVerified(page.verified)
+    } catch (err) {
+      setMaterializationError(String(err))
+    } finally {
+      setMaterializationLoading(false)
+    }
   }
 
   function selectAgent(eventId: number, resultId?: number) {
@@ -471,14 +629,41 @@ function App() {
       </section>
     </main> : <main className="run-page">
       <div className="run-header">
-        <div><button className="back-button" onClick={() => navigate(null)}>← All runs</button><p className="eyebrow">{snapshot?.experiment === '2A' ? '2A · OBEY' : snapshot?.experiment === '2B' ? '2B · EXPLORE' : 'RUN'}</p><h1 className="run-title">{runId}</h1><div className="run-meta"><span className={statusClass(snapshot?.status || 'queued')}>{snapshot?.status || 'loading'}</span><span>{snapshot?.mode || '—'}</span><span>{snapshot?.arm || '—'}</span>{snapshot?.decoy_protocol && <span>{snapshot.decoy_protocol}</span>}<span>{snapshot?.provider?.toUpperCase() || 'MODEL-FREE'}</span><span>{snapshot?.experimental_result ? 'EXPERIMENTAL' : 'ENGINEERING / FIXTURE'}</span></div></div>
-        <div className="timer-card"><span>AGENT ELAPSED</span><strong>{elapsed(agentStarted, agentStop, now)}<small> / {snapshot?.max_wall_seconds ? `${Math.floor(snapshot.max_wall_seconds / 60)}:00` : '—'}</small></strong><div>Decoy engaged <b>{elapsed(entryEvent?.occurred_utc || null, agentStop, now)}</b></div></div>
+        <div>
+          <button className="back-button" onClick={() => navigate(null)}>← All runs</button>
+          <p className="eyebrow">{snapshot?.experiment === '2A' ? '2A · OBEY' : snapshot?.experiment === '2B' ? '2B · EXPLORE' : 'RUN'}</p>
+          <h1 className="run-title">{runId}</h1>
+          <div className="run-meta">
+            <span className={statusClass(snapshot?.status || 'queued')}>{snapshot?.status || 'loading'}</span>
+            <span>{snapshot?.mode || '—'}</span><span>{snapshot?.arm || '—'}</span>
+            {snapshot?.decoy_protocol && <span>{snapshot.decoy_protocol}</span>}
+            {pathStory && snapshot?.pilot_protocol && <span>{snapshot.pilot_protocol}</span>}
+            {pathStory && typeof snapshot?.slot === 'number' && <span>Slot {snapshot.slot}</span>}
+            {pathStory && typeof snapshot?.block === 'number' && <span>Block {snapshot.block}</span>}
+            <span>{snapshot?.provider?.toUpperCase() || 'MODEL-FREE'}</span>
+            <span>{pathStory ? 'PILOT OBSERVATION' : snapshot?.experimental_result ? 'EXPERIMENTAL' : 'ENGINEERING / FIXTURE'}</span>
+            {pathStory && snapshot?.attempt_classification && <span className={snapshot.attempt_classification === 'infrastructure_invalid' ? 'pilot-invalid' : ''}>{snapshot.attempt_classification.replaceAll('_', ' ')}</span>}
+          </div>
+          {pathStory && snapshot?.pilot_id && <p className="pilot-identity">Pilot {snapshot.pilot_id}</p>}
+        </div>
+        <div className="timer-card"><span>{pathStory ? 'TRIAL CLOCK' : 'AGENT ELAPSED'}</span><strong>{pathStory ? durationSeconds(trialElapsedSeconds) : elapsed(agentStarted, agentStop, now)}<small> / {durationSeconds(agentWallLimit)}</small></strong><div>{pathStory ? 'Post-entry' : 'Decoy engaged'} <b>{pathStory ? durationSeconds(pathProgress?.post_entry_elapsed_seconds) : elapsed(entryTime, agentStop, now)}</b></div></div>
       </div>
       {snapshot?.mode === 'deterministic_fixture' || snapshot?.mode === 'deterministic' ? <div className="fixture-banner">MODEL-FREE FIXTURE CHECK <span>•</span> No autonomous agent is launched in this mode. Server events are live evidence of the check; agent activity is available in archived agent runs.</div> : null}
       {snapshot?.mode === 'connectivity_fixture' || snapshot?.experiment === '2B' && snapshot?.mode === 'connectivity' ? <div className="fixture-banner">2B AGENT CONNECTIVITY CHECK <span>•</span> B0 uses generic fixture content. This is an engineering check, not a B0–B3 treatment result.</div> : null}
       {snapshot?.error && <div className="fixture-banner">RUN ERROR <span>•</span> {snapshot.error}</div>}
+      {pathStory && <div className="fixture-banner">2B PATH-STORY PILOT <span>•</span> This page monitors a frozen pilot attempt. The pilot controller decides whether an attempt counts; this page does not launch or reschedule assignments.</div>}
+      {pathStory && snapshot?.attempt_classification === 'infrastructure_invalid' && <div className="fixture-banner pilot-invalid-banner">INFRASTRUCTURE-INVALID ATTEMPT <span>•</span> {snapshot.termination_reason === 'provider_rate_limit' ? 'The provider rejected a model request. This is not a decoy outcome.' : 'This attempt does not count as a behavioral pilot outcome.'}</div>}
       {snapshot?.experiment === '2A' && snapshot.status === 'failed' && serverActions === 0 && <div className="fixture-banner">NO TARGET REQUESTS <span>•</span> The web decoy recorded no HTTP requests.{rateLimited ? ' The model gateway recorded HTTP 429.' : ''} Inspect the gateway and agent error events below.</div>}
       {snapshot?.experiment === '2A' && ['pilot', 'engineering'].includes(snapshot.mode || '') && <div className="pilot-stages" aria-label="2A run progress">{pilotStages.map(stage => <div key={stage.label} className={stage.reached ? 'reached' : stage.active && snapshot.status === 'running' ? 'active' : ''}><span>{stage.label}</span><strong>{stage.reached ? 'Observed' : snapshot.status === 'failed' || snapshot.status === 'complete' ? 'Not reached' : stage.active ? 'Planned' : 'Waiting'}</strong></div>)}</div>}
+      {pathStory && <>
+        <div className="pilot-stages" aria-label="2B path-story progress">{pathStoryStages.map(stage => <div key={stage.label} className={stage.reached ? 'reached' : ''}><span>{stage.label}</span><strong>{stage.reached ? 'Observed' : stage.pending ? 'Pending evidence' : snapshot?.finished_utc ? 'Not observed' : 'Waiting'}</strong></div>)}</div>
+        <div className="path-story-summary">
+          <div><span>CLOCK PHASE</span><strong>{phaseName(pathProgress?.phase)}</strong>{pathProgress?.selected_reason && <small>Selected: {phaseName(pathProgress.selected_reason)}</small>}</div>
+          <div><span>PRE-ENTRY</span><strong>{durationSeconds(pathProgress?.pre_entry_elapsed_seconds)} / {durationSeconds(pathProgress?.pre_entry_wall_seconds)}</strong></div>
+          <div><span>POST-ENTRY</span><strong>{durationSeconds(pathProgress?.post_entry_elapsed_seconds)} / {durationSeconds(pathProgress?.post_entry_wall_seconds)}</strong></div>
+          <div><span>QUALIFIED ENTRY</span><strong>{timestamp(pathProgress?.qualified_entry_utc)}</strong></div>
+        </div>
+      </>}
       <div className="monitor-grid">
         <section className="monitor-panel agent-panel"><div className="panel-heading"><div><span className="panel-kicker">01 / AGENT</span><h2>{feedMode === 'activity' ? 'Activity' : 'Diagnostics'}</h2></div><span className="panel-count">{feedItems.length} items</span></div>
           <div className="feed-controls"><div className="feed-tabs" role="group" aria-label="Agent feed view"><button type="button" className={feedMode === 'activity' ? 'active' : ''} aria-pressed={feedMode === 'activity'} onClick={() => setFeedMode('activity')}>Activity</button><button type="button" className={feedMode === 'diagnostics' ? 'active' : ''} aria-pressed={feedMode === 'diagnostics'} onClick={() => setFeedMode('diagnostics')}>Diagnostics</button></div><span>Private reasoning is omitted from the trace.</span></div>
@@ -502,13 +687,28 @@ function App() {
             </article>
           }) : <div className="panel-empty"><span>◌</span><strong>No agent trace in this run</strong><p>{snapshot?.mode?.startsWith('deterministic') ? 'This check exercises only the decoy. Select an archived connectivity or pilot run to inspect agent tool use.' : 'Waiting for agent events.'}</p></div>}</div>
         </section>
-        <section className="monitor-panel server-panel"><div className="panel-heading"><div><span className="panel-kicker">02 / {snapshot?.experiment === '2A' ? 'WEB DECOY + MODEL GATEWAY' : 'FILESYSTEM DECOY + MODEL GATEWAY'}</span><h2>Server timeline</h2></div><span className="panel-count">{serverItems.length} items</span></div>
+        <section className="monitor-panel server-panel"><div className="panel-heading"><div><span className="panel-kicker">02 / {snapshot?.experiment === '2A' ? 'WEB DECOY + MODEL GATEWAY' : 'FILESYSTEM DECOY + MODEL GATEWAY'}</span><h2>Server timeline</h2></div><span className="panel-count">{serverItems.length} items{pathStory && <><br />{materializedNodes === null ? 'Generated paths pending inventory' : `${materializedNodes.toLocaleString()} generated paths below`}</>}</span></div>
           <div className="server-content"><div className="server-rail">{serverItems.length ? serverItems.map(({ event, response }) => <button key={event.event_id} className={`rail-event ${selectedServerItem?.event.event_id === event.event_id ? 'chosen' : ''} ${['activation', 'canary_hit', 'reinforcement_delivered'].includes(event.kind) ? 'milestone' : ''}`} onClick={() => setSelectedId(event.event_id)}><span className="rail-dot" /><span className="rail-time">{shortTime(event.occurred_utc)}</span><span className="rail-title">{response ? `${eventTitle(event)} → ${String(response.detail.status || 'response')}` : eventTitle(event)}</span></button>) : <div className="panel-empty"><span>◌</span><strong>Waiting for server events</strong><p>Build and preflight may still be running.</p></div>}</div>
             <div className="detail-card"><div className="detail-top"><span>SELECTED EVENT</span><span>#{selectedServerItem?.event.event_id || selected?.event_id || '—'}</span></div>{targetTool && <div className="relation-note">{linked.length ? `${linked.length} target event${linked.length === 1 ? '' : 's'} during this tool call · time-correlated` : 'No target request was observed during this tool call.'}</div>}{selected ? <><h3>{selectedServerItem?.response ? `${eventTitle(selectedServerItem.event)} → ${String(selectedServerItem.response.detail.status || 'response')}` : eventTitle(selected)}</h3><p>{timestamp(selected.occurred_utc)} · {selected.source}</p>{selectedServerItem?.response && <div className="server-request"><strong>REQUEST</strong><pre>{JSON.stringify(selectedServerItem.event.detail, null, 2)}</pre><strong>RESPONSE</strong></div>}<pre>{eventBody(selectedServerItem?.response || selected) || JSON.stringify((selectedServerItem?.response || selected).detail, null, 2)}</pre></> : <p>{picked?.source === 'agent' ? 'This agent item has no target response to display. Select a server event to inspect its observation.' : 'Select a timeline event to inspect the raw observation.'}</p>}</div>
           </div>
         </section>
       </div>
-      <div className="metric-strip"><div><span>AGENT TOOLS</span><strong>{agentToolCount}</strong></div><div><span>{snapshot?.experiment === '2A' ? 'WEB REQUESTS' : 'FS ACTIONS'}</span><strong>{serverActions}</strong></div><div><span>MODEL CALLS</span><strong>{modelCalls}</strong></div><div><span>TERMINATION</span><strong>{snapshot?.termination_reason || '—'}</strong></div></div>
+      <div className="metric-strip"><div><span>AGENT TOOLS</span><strong>{pathStory && typeof pathProgress?.agent_tool_calls === 'number' ? pathProgress.agent_tool_calls : agentToolCount}</strong></div><div><span>{snapshot?.experiment === '2A' ? 'WEB REQUESTS' : 'FS ACTIONS'}</span><strong>{serverActions}</strong></div><div><span>MODEL CALLS</span><strong>{modelCalls}</strong></div><div><span>TERMINATION</span><strong>{snapshot?.termination_reason || '—'}</strong></div></div>
+      {pathStory && <>
+        <div className="path-story-extra">
+          <div><span>GENERATED PATHS</span><strong>{materializedNodes === null ? 'Pending inventory' : materializedNodes.toLocaleString()}</strong></div>
+          <div><span>MONITORED TOKENS</span><strong>{typeof pathProgress?.model_tokens === 'number' ? pathProgress.model_tokens.toLocaleString() : '—'}</strong></div>
+          <div><span>PROVIDER CREDITS</span><strong>{snapshot?.provider_credits_estimated ? `${snapshot.provider_credits_estimated} estimated` : 'Pending usage'}</strong><small>Settlement: {snapshot?.provider_settlement_state || 'pending'}</small></div>
+        </div>
+        <section className="materialization-panel" aria-label="Materialized filesystem inventory">
+          <div className="materialization-heading"><div><span className="panel-kicker">03 / FILESYSTEM INVENTORY</span><h2>Paths generated during this run</h2></div><span>{materializationTotal.toLocaleString()} archived · {materializationAvailable ? materializationVerified ? 'verified' : 'verification pending' : 'inventory pending'}</span></div>
+          {materializationError && <p className="materialization-error">Inventory request failed: {materializationError}</p>}
+          {!materializationAvailable ? <p className="materialization-empty">The verified path inventory becomes available when the run archive is ready.</p> : materializations.length === 0 ? <p className="materialization-empty">No paths were generated in this run.</p> : <>
+            <div className="materialization-list">{materializations.map(item => <div key={item.inventory_index}><span>#{item.inventory_index}</span><strong>{item.path}</strong><small>Response {item.response_sequence}</small></div>)}</div>
+            {materializationTotal > materializations.length && <button type="button" className="materialization-more" disabled={materializationLoading} onClick={loadMoreMaterializations}>{materializationLoading ? 'Loading…' : `Load more paths (${materializations.length}/${materializationTotal})`}</button>}
+          </>}
+        </section>
+      </>}
     </main>}
 
     {error && <div className="error-toast" role="alert">{error}<button onClick={() => setError(null)}>×</button></div>}

@@ -6,6 +6,13 @@ agent and decoy events, and allowlisted launch controls. It offers 2A C2 pilot,
 The 2B connectivity run uses the integrated schema-v2 `ledger-prod-01`
 engineering fixture and remains separate from experiment evidence. The frozen
 2B B0-B3 pilot is deliberately CLI-controlled and is not launched by this UI.
+CLI-run path-story pilot attempts appear in the archive and can be monitored
+here. Their page shows the pilot slot, pre-entry and post-entry clocks, live
+filesystem and model counters, and the qualified entry time. Decoy and gateway
+event journals appear after the run finishes; generated paths are paged from
+the hash-checked materialization inventory. A provider rate limit is shown as
+an infrastructure-invalid attempt. Completion alone does not establish pilot
+slot validity; the pilot controller remains the eligibility authority.
 
 ## Start
 
@@ -90,15 +97,21 @@ connectivity check keeps its shorter four-minute wall cap and does not use
 these waits. Gateway trial-cap 429s are never retried.
 
 The run page appears immediately, including before the controller creates its
-run directory. During execution the controllers mirror decoy logs to
-`decoy-live.jsonl` (and gateway/agent logs where applicable). The API writes a
-derived `monitor-events.jsonl` inside each ignored run directory. Final raw
-`decoy-events.jsonl`, traces, manifests, and replay checks remain authoritative.
+run directory. During 2A and 2B fixture runs the controllers mirror decoy logs
+to `decoy-live.jsonl` (and gateway/agent logs where applicable). Frozen 2B
+path-story runs instead provide live `cap-monitor.jsonl` samples; their decoy
+and gateway journals are archived after teardown. The API writes its derived
+event index under ignored `runs/.dashboard-monitor/`, outside signed run
+directories. It reads archived 2B agent state without creating SQLite WAL
+files. Final raw journals, traces, manifests, and replay checks remain
+authoritative.
 
-The upper-right **Agent elapsed** timer starts only when an `AGENT_STARTED`
-record is observed. Fixture checks launch no agent, so that timer displays
-`—`. The nearby **Decoy engaged** timer starts from the first decoy request
-for 2A or first virtual filesystem interaction for 2B.
+For 2A and fixture runs, the upper-right **Agent elapsed** timer starts when
+an `AGENT_STARTED` record is observed. Fixture checks launch no agent, so that
+timer displays `—`. The nearby **Decoy engaged** timer starts from the first
+decoy request for 2A or first virtual filesystem interaction for 2B. Path-story
+pilots instead show their live pre-entry plus post-entry trial clock and the
+post-entry elapsed time from `cap-monitor.jsonl`.
 
 ## Activity and diagnostics
 

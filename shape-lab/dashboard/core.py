@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import base64
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
+import tempfile
 import threading
-from typing import Any
+from typing import Any, Iterator
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 LAB = Path(__file__).resolve().parents[1]
 RUNS = LAB / "runs"
 JOBS = RUNS / ".dashboard-jobs"
+STUDIES = LAB / "studies"
 UI_DIST = LAB / "dashboard_ui" / "dist"
 RUN_ID_RE = re.compile(r"2[ab]-[a-z0-9-]{1,75}$")
 SEED_RE = re.compile(r"[A-Za-z0-9._-]{1,128}$")
@@ -58,6 +61,201 @@ def read_json(path: Path) -> dict[str, Any] | None:
     except (FileNotFoundError, ValueError, OSError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _path_story(run_id: str) -> bool:
+    return run_id.startswith("2b-path-") and RUN_ID_RE.fullmatch(run_id) is not None
+
+
+def monitor_index_path(run_id: str) -> Path:
+    """Keep derived UI state outside controller-signed run archives."""
+    if RUN_ID_RE.fullmatch(run_id) is None:
+        raise ValueError("Invalid run ID")
+    return RUNS / ".dashboard-monitor" / run_id / "events.jsonl"
+
+
+def _controller_manifest(path: Path) -> dict[str, Any]:
+    if not _path_story(path.name):
+        return read_json(path / "manifest.json") or {}
+    attempt = read_json(path / "attempt-manifest.json") or {}
+    if attempt.get("run_id") != path.name or not str(attempt.get("pilot_protocol", "")).startswith(
+        "2b-path-story-pilot-"
+    ):
+        return {}
+    return attempt
+
+
+def _manifest_name(path: Path) -> str:
+    return "attempt-manifest.json" if _path_story(path.name) else "manifest.json"
+
+
+def _pending_path_story() -> dict[str, dict[str, Any]]:
+    """Read admitted pilot assignments for runs that have not archived yet."""
+    if not STUDIES.is_dir():
+        return {}
+    pending: dict[str, dict[str, Any]] = {}
+    for folder in STUDIES.iterdir():
+        if not folder.is_dir() or folder.is_symlink() or not folder.name.startswith("2b-path-story-pilot-"):
+            continue
+        admission = read_json(folder / "pending-run.json") or {}
+        run_id = admission.get("run_id")
+        if not isinstance(run_id, str) or not _path_story(run_id) or admission.get("pilot_id") != folder.name:
+            continue
+        schedule = read_json(folder / "schedule.json") or {}
+        assignments = schedule.get("assignments")
+        slot = admission.get("slot")
+        if not isinstance(assignments, list) or not isinstance(slot, int) or isinstance(slot, bool):
+            continue
+        assignment = next((row for row in assignments if isinstance(row, dict) and row.get("slot") == slot), None)
+        if assignment is None:
+            continue
+        contract = schedule.get("contract") if isinstance(schedule.get("contract"), dict) else {}
+        pending[run_id] = {
+            "pilot_id": folder.name,
+            "pilot_protocol": schedule.get("pilot_protocol"),
+            "slot": slot,
+            "block": assignment.get("block"),
+            "arm": assignment.get("arm"),
+            "provider": contract.get("provider"),
+            "started_utc": admission.get("created_utc"),
+            "trial_caps": contract.get("trial_caps") if isinstance(contract.get("trial_caps"), dict) else {},
+        }
+    return pending
+
+
+def _last_complete_jsonl(path: Path) -> dict[str, Any] | None:
+    """Read one live monitor sample without loading its growing journal."""
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 65536))
+            lines = stream.read().splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and isinstance(value.get("observed_utc"), str):
+            return value
+    return None
+
+
+def _path_story_progress(path: Path, manifest: dict[str, Any], pending: dict[str, Any]) -> dict[str, Any] | None:
+    if not _path_story(path.name):
+        return None
+    sample = _last_complete_jsonl(path / "cap-monitor.jsonl")
+    clock = manifest.get("clock") if isinstance(manifest.get("clock"), dict) else {}
+    caps = manifest.get("trial_caps") if isinstance(manifest.get("trial_caps"), dict) else pending.get("trial_caps", {})
+    replay = manifest.get("replay") if isinstance(manifest.get("replay"), dict) else {}
+    if not sample and not clock:
+        return None
+    sample = sample or {}
+    return {
+        "phase": clock.get("clock_phase") or sample.get("clock_phase"),
+        "observed_utc": sample.get("observed_utc"),
+        "pre_entry_elapsed_seconds": clock.get("pre_entry_elapsed_seconds", sample.get("pre_entry_elapsed_seconds")),
+        "post_entry_elapsed_seconds": clock.get("post_entry_elapsed_seconds", sample.get("post_entry_elapsed_seconds")),
+        "pre_entry_wall_seconds": caps.get("pre_entry_wall_seconds"),
+        "post_entry_wall_seconds": caps.get("post_entry_wall_seconds"),
+        "qualified_entry_utc": clock.get("qualified_entry_utc") or sample.get("qualified_entry_utc"),
+        "filesystem_actions": replay.get("filesystem_actions", sample.get("filesystem_actions")),
+        "materialized_nodes": replay.get("materialized_nodes"),
+        "agent_tool_calls": sample.get("agent_tool_calls"),
+        "model_calls": sample.get("model_calls"),
+        "model_tokens": sample.get("model_tokens"),
+        "selected_reason": manifest.get("termination_reason") or sample.get("selected_reason"),
+    }
+
+
+def _path_story_artifacts_match(path: Path, manifest: dict[str, Any]) -> bool:
+    """Verify the complete signed file set without writing to the run archive."""
+    artifacts = manifest.get("artifact_sha256")
+    if not isinstance(artifacts, dict) or not artifacts:
+        return False
+    found: set[str] = set()
+    try:
+        for item in path.rglob("*"):
+            if item.is_symlink():
+                return False
+            if not item.is_file():
+                continue
+            name = item.relative_to(path).as_posix()
+            if name in {"attempt-manifest.json", "result.json"}:
+                continue
+            expected = artifacts.get(name)
+            if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+                return False
+            digest = hashlib.sha256()
+            with item.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != expected:
+                return False
+            found.add(name)
+    except OSError:
+        return False
+    return found == set(artifacts)
+
+
+def _path_story_archive_complete(path: Path, manifest: dict[str, Any], result: dict[str, Any]) -> bool:
+    """Require committed records and signed artifacts before calling an attempt reviewable."""
+    settlement = manifest.get("provider_settlement")
+    replay = manifest.get("replay")
+    return (
+        isinstance(manifest.get("finished_utc"), str)
+        and isinstance(settlement, dict) and settlement.get("state") == "complete"
+        and isinstance(replay, dict)
+        and isinstance(result.get("score"), dict)
+        and result.get("manifest") == manifest
+        and result.get("replay") == replay
+        and _path_story_artifacts_match(path, manifest)
+    )
+
+
+def _path_story_classification(manifest: dict[str, Any], result: dict[str, Any],
+                               admission: dict[str, Any], archive_complete: bool) -> str | None:
+    if not manifest:
+        return None
+    if (manifest.get("termination_reason") in {"provider_rate_limit", "agent_failure", "controller_error"}
+            or manifest.get("error") or manifest.get("provider_credit_error")
+            or manifest.get("path_story_evidence_error")
+            or isinstance(manifest.get("provider_settlement"), dict)
+            and manifest["provider_settlement"].get("state") != "complete"):
+        return "infrastructure_invalid"
+    if archive_complete:
+        return "controller_review"
+    return None if admission and not result else "infrastructure_invalid"
+
+
+def _path_story_status(manifest: dict[str, Any], result: dict[str, Any],
+                       admission: dict[str, Any], progress: dict[str, Any] | None,
+                       archive_complete: bool) -> str:
+    if _path_story_error(manifest):
+        return "failed"
+    if archive_complete:
+        return "complete"
+    if manifest and result:
+        return "failed"
+    if manifest or result:
+        return "running" if admission else "failed"
+    return "running" if progress or admission else "archived"
+
+
+def _path_story_error(manifest: dict[str, Any]) -> str | None:
+    for key in ("error", "provider_credit_error", "path_story_evidence_error"):
+        value = manifest.get(key)
+        if isinstance(value, str) and value:
+            return value
+    if manifest.get("termination_reason") == "provider_rate_limit":
+        return "Provider rate limit; this attempt is infrastructure-invalid"
+    if manifest.get("termination_reason") in {"agent_failure", "controller_error"}:
+        return str(manifest["termination_reason"]).replace("_", " ")
+    settlement = manifest.get("provider_settlement")
+    if isinstance(settlement, dict) and settlement.get("state") != "complete":
+        return "Provider settlement is incomplete"
+    return None
 
 
 class RunRequest(BaseModel):
@@ -161,24 +359,53 @@ def archived_provider(manifest: dict[str, Any], job: dict[str, Any]) -> str | No
 def list_runs(limit: int = 80) -> list[dict[str, Any]]:
     RUNS.mkdir(parents=True, exist_ok=True, mode=0o700)
     rows = []
+    pending = _pending_path_story()
+    found: set[str] = set()
     for path in RUNS.iterdir():
         if not path.is_dir() or path.is_symlink() or not RUN_ID_RE.fullmatch(path.name):
             continue
-        manifest = read_json(path / "manifest.json") or {}
+        found.add(path.name)
+        path_story = _path_story(path.name)
+        manifest = _controller_manifest(path)
+        decoy = (read_json(path / "manifest.json") or {}) if path_story else {}
+        admission = pending.get(path.name, {}) if path_story else {}
         job = job_status(path.name) or {}
-        error = archive_error(manifest) or job.get("error")
+        error = (_path_story_error(manifest) if path_story else archive_error(manifest)) or job.get("error")
+        progress = _path_story_progress(path, manifest, admission) if path_story else None
+        result = (read_json(path / "result.json") or {}) if path_story else {}
+        archive_complete = _path_story_archive_complete(path, manifest, result) if path_story else False
+        status = _path_story_status(manifest, result, admission, progress, archive_complete) if path_story else (
+                      "failed" if error else job.get("status") or ("complete" if (path / "result.json").exists() else "archived"))
         rows.append({
             "run_id": path.name,
             "experiment": "2A" if path.name.startswith("2a-") else "2B",
-            "mode": manifest.get("mode") or job.get("mode") or "unknown",
-            "arm": manifest.get("arm") or job.get("arm"),
-            "provider": archived_provider(manifest, job),
-            "decoy_protocol": manifest.get("decoy_protocol") or job.get("decoy_protocol") or ("text-only" if path.name.startswith("2a-") else None),
-            "status": "failed" if error else job.get("status") or ("complete" if (path / "result.json").exists() else "archived"),
-            "started_utc": manifest.get("started_utc") or job.get("created_utc"),
+            "mode": manifest.get("mode") or ("path_story_pilot" if path_story else job.get("mode") or "unknown"),
+            "arm": manifest.get("arm") or admission.get("arm") or decoy.get("arm") or job.get("arm"),
+            "provider": manifest.get("provider") or admission.get("provider") if path_story else archived_provider(manifest, job),
+            "decoy_protocol": (manifest.get("environment_protocol") or "filesystem-path-story-v1") if path_story else manifest.get("decoy_protocol") or job.get("decoy_protocol") or ("text-only" if path.name.startswith("2a-") else None),
+            "status": status,
+            "started_utc": manifest.get("started_utc") or admission.get("started_utc") or job.get("created_utc"),
             "finished_utc": manifest.get("finished_utc"),
-            "termination_reason": manifest.get("termination_reason"),
+            "termination_reason": manifest.get("termination_reason") or (progress or {}).get("selected_reason"),
             "experimental_result": bool(manifest.get("experimental_result", False)),
+            "pilot_id": manifest.get("pilot_id") or admission.get("pilot_id"),
+            "pilot_protocol": manifest.get("pilot_protocol") or admission.get("pilot_protocol"),
+            "slot": manifest.get("slot") or admission.get("slot"),
+            "block": manifest.get("block") or admission.get("block"),
+            "attempt_classification": _path_story_classification(manifest, result, admission, archive_complete) if path_story else None,
+        })
+    for run_id, admission in pending.items():
+        if run_id in found or (RUNS / run_id).exists():
+            continue
+        rows.append({
+            "run_id": run_id, "experiment": "2B", "mode": "path_story_pilot",
+            "arm": admission.get("arm"), "provider": admission.get("provider"),
+            "decoy_protocol": "filesystem-path-story-v1", "status": "queued",
+            "started_utc": admission.get("started_utc"), "finished_utc": None,
+            "termination_reason": None, "experimental_result": False,
+            "pilot_id": admission.get("pilot_id"), "pilot_protocol": admission.get("pilot_protocol"),
+            "slot": admission.get("slot"), "block": admission.get("block"),
+            "attempt_classification": None,
         })
     rows.sort(key=lambda item: item["started_utc"] or "", reverse=True)
     return rows[:limit]
@@ -261,20 +488,46 @@ def _project(source: str, row: dict[str, Any], *, episode_id: str | None = None,
             "role": role, "call_id": row.get("call_id"), "detail": _compact(detail)}
 
 
+def _sqlite_read_uri(database: Path, run_id: str, run_dir: Path) -> str:
+    # SQLite mode=ro may still create WAL/SHM beside the database. Frozen 2B
+    # archives cannot gain files, and completed 2A runs should stay untouched.
+    immutable = bool(_controller_manifest(run_dir).get("finished_utc")) or (run_dir / "result.json").is_file()
+    return database.as_uri() + ("?mode=ro&immutable=1" if immutable else "?mode=ro")
+
+
+@contextmanager
+def _state_connection(database: Path, run_id: str, run_dir: Path) -> Iterator[sqlite3.Connection]:
+    """Read committed WAL rows without writing into a finalized run archive."""
+    uri = _sqlite_read_uri(database, run_id, run_dir)
+    wal = database.with_name(database.name + "-wal")
+    if "immutable=1" in uri and wal.exists():
+        if wal.is_symlink() or not wal.is_file() or wal.resolve().parent != database.parent.resolve():
+            raise sqlite3.DatabaseError("Agent WAL is not a regular archive file")
+        with tempfile.TemporaryDirectory(prefix="shape-dashboard-sqlite-") as temporary:
+            copy = Path(temporary) / database.name
+            shutil.copyfile(database, copy)
+            shutil.copyfile(wal, copy.with_name(wal.name))
+            with closing(sqlite3.connect(copy.as_uri() + "?mode=ro", uri=True, timeout=0.1)) as connection:
+                yield connection
+        return
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.1)) as connection:
+        yield connection
+
+
 def _state_rows(path: Path, run_id: str) -> list[dict[str, Any]]:
     """Read only committed PentestGPT transitions from the live trial database."""
     database = path / "agent" / "runs" / run_id / "state.sqlite3"
     if not database.is_file() or database.is_symlink():
         return []
     try:
-        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0.1)) as connection:
+        with _state_connection(database, run_id, path) as connection:
             connection.row_factory = sqlite3.Row
             tasks = {row["task_id"]: dict(row) for row in connection.execute(
                 "SELECT task_id, kind, target, objective, done_when FROM tasks WHERE run_id = ?", (run_id,))}
             transitions = [dict(row) for row in connection.execute(
                 "SELECT revision, kind, task_id, attempt_id, detail, created_at "
                 "FROM transitions WHERE run_id = ? ORDER BY revision", (run_id,))]
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError):
         return []  # The agent may still be creating its database or committing a transition.
     projected = []
     reference = f"agent/runs/{run_id}/state.sqlite3"
@@ -348,7 +601,7 @@ class Collector:
     def collect(self, run_id: str) -> list[dict[str, Any]]:
         path = run_path(run_id)
         session_v2 = (read_json(path / "manifest.json") or {}).get("decoy_protocol") == "session-v2"
-        index = path / "monitor-events.jsonl"
+        index = monitor_index_path(run_id)
         with self.lock:
             existing = [row for _, row in _jsonl(index) if "event_id" in row]
             seen = {row.get("source_key") for row in existing}
@@ -359,6 +612,8 @@ class Collector:
                     for line, row in _jsonl(path / filename):
                         if row.get("run_id") != run_id and row.get("event_type") != "telemetry_gap":
                             continue
+                        if _path_story(run_id) and row.get("event_type") == "filesystem_materialized":
+                            continue  # The verified inventory has its own paginated view.
                         sequence = row.get("sequence")
                         key = f"{source}:{sequence}" if isinstance(sequence, int) else f"{source}:{filename}:{line}"
                         if key in seen:
@@ -415,11 +670,11 @@ class Collector:
                                   "episode_id": None, "role": None, "call_id": None,
                                   "detail": {"message": "Agent process started"}})
 
-            manifest = read_json(path / "manifest.json") or {}
+            manifest = _controller_manifest(path)
             finished = manifest.get("finished_utc")
             if isinstance(finished, str) and "controller:outcome" not in seen:
                 summary = read_json(path / "agent" / "runs" / run_id / "summary.json")
-                fresh.append({"source_key": "controller:outcome", "raw_ref": {"file": "manifest.json"},
+                fresh.append({"source_key": "controller:outcome", "raw_ref": {"file": _manifest_name(path)},
                               "source": "controller", "kind": "run_outcome",
                               "occurred_utc": finished, "source_sequence": None,
                               "episode_id": None, "role": None, "call_id": None,
@@ -428,7 +683,10 @@ class Collector:
 
             if fresh:
                 fresh.sort(key=lambda item: (item["occurred_utc"], item["source_key"]))
-                descriptor = os.open(index, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                index.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                if index.parent.is_symlink():
+                    raise RuntimeError("Dashboard monitor cache is a symlink")
+                descriptor = os.open(index, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
                 with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                     for item in fresh:
                         if session_v2:
@@ -453,6 +711,7 @@ def raw_event_record(run_id: str, event_id: int) -> dict[str, Any]:
         raise FileNotFoundError(event_id)
     path = run_path(run_id)
     session_v2 = (read_json(path / "manifest.json") or {}).get("decoy_protocol") == "session-v2"
+    manifest_name = _manifest_name(path)
 
     def visible(record: dict[str, Any]) -> dict[str, Any]:
         return _redact_session(record) if session_v2 else record
@@ -468,9 +727,11 @@ def raw_event_record(run_id: str, event_id: int) -> dict[str, Any]:
     line_files = {"decoy-live.jsonl", "decoy-events.jsonl", "gateway-live.jsonl",
                   "gateway-events.jsonl", "agent-live.log", "agent-stdout.log"}
     if Path(relative).is_absolute() or ".." in Path(relative).parts or not (
-        relative in line_files | {"manifest.json", state_name, summary_name}
+        relative in line_files | {manifest_name, state_name, summary_name}
         or re.fullmatch(trace_pattern, relative)
     ):
+        raise FileNotFoundError(event_id)
+    if relative == "attempt-manifest.json" and event.get("kind") != "run_outcome":
         raise FileNotFoundError(event_id)
     source = path / relative
     if session_v2 and re.fullmatch(trace_pattern, relative):
@@ -492,12 +753,12 @@ def raw_event_record(run_id: str, event_id: int) -> dict[str, Any]:
         if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
             raise FileNotFoundError(event_id)
         try:
-            with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True, timeout=0.1)) as connection:
+            with _state_connection(source, run_id, path) as connection:
                 connection.row_factory = sqlite3.Row
                 record = connection.execute(
                     "SELECT revision, kind, task_id, attempt_id, detail, created_at "
                     "FROM transitions WHERE run_id = ? AND revision = ?", (run_id, revision)).fetchone()
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, OSError) as exc:
             raise FileNotFoundError(event_id) from exc
         if record is None:
             raise FileNotFoundError(event_id)
@@ -507,11 +768,11 @@ def raw_event_record(run_id: str, event_id: int) -> dict[str, Any]:
         except (TypeError, ValueError):
             pass
         return visible({"raw_ref": reference, "record": result})
-    if relative in {"manifest.json", summary_name}:
+    if relative in {manifest_name, summary_name}:
         record = read_json(source)
         if record is None:
             raise FileNotFoundError(event_id)
-        if relative == "manifest.json" and event.get("kind") == "run_outcome":
+        if relative == manifest_name and event.get("kind") == "run_outcome":
             summary_path = path / summary_name
             if summary_path.is_file() and summary_path.resolve().is_relative_to(path.resolve()) and not any(
                 parent.is_symlink() for parent in (summary_path, *summary_path.parents)
@@ -539,6 +800,44 @@ def raw_event_record(run_id: str, event_id: int) -> dict[str, Any]:
 def run_snapshot(run_id: str) -> dict[str, Any]:
     path = run_path(run_id)
     events = collector.collect(run_id)
+    if _path_story(run_id):
+        manifest = _controller_manifest(path)
+        decoy = read_json(path / "manifest.json") or {}
+        admission = _pending_path_story().get(run_id, {})
+        progress = _path_story_progress(path, manifest, admission)
+        result = read_json(path / "result.json") or {}
+        error = _path_story_error(manifest)
+        archive_complete = _path_story_archive_complete(path, manifest, result)
+        if not error and manifest and result and not archive_complete:
+            error = "Archived evidence is incomplete or differs from its signed manifest"
+        classification = _path_story_classification(manifest, result, admission, archive_complete)
+        status = _path_story_status(manifest, result, admission, progress, archive_complete)
+        credits = manifest.get("provider_credits") if isinstance(manifest.get("provider_credits"), dict) else {}
+        settlement = manifest.get("provider_settlement") if isinstance(manifest.get("provider_settlement"), dict) else {}
+        caps = manifest.get("trial_caps") if isinstance(manifest.get("trial_caps"), dict) else admission.get("trial_caps", {})
+        outcome = next((item["detail"] for item in events if item["kind"] == "run_outcome"), None)
+        return {
+            "run_id": run_id, "experiment": "2B", "mode": manifest.get("mode") or "path_story_pilot",
+            "arm": manifest.get("arm") or admission.get("arm") or decoy.get("arm"),
+            "provider": manifest.get("provider") or admission.get("provider"),
+            "decoy_protocol": manifest.get("environment_protocol") or "filesystem-path-story-v1",
+            "status": status, "started_utc": manifest.get("started_utc") or admission.get("started_utc"),
+            "agent_started_utc": next((item["occurred_utc"] for item in events if item["kind"] == "agent_started"), None),
+            "finished_utc": manifest.get("finished_utc"),
+            "termination_reason": manifest.get("termination_reason") or (progress or {}).get("selected_reason"),
+            "error": error, "diagnosed_cause": outcome.get("cause") if outcome else None,
+            "max_wall_seconds": caps.get("maximum_total_wall_seconds"),
+            "experimental_result": bool(manifest.get("experimental_result", False)),
+            "event_count": len(events), "score": result.get("score"), "job": {},
+            "pilot_id": manifest.get("pilot_id") or admission.get("pilot_id"),
+            "pilot_protocol": manifest.get("pilot_protocol") or admission.get("pilot_protocol"),
+            "slot": manifest.get("slot") or admission.get("slot"),
+            "block": manifest.get("block") or admission.get("block"),
+            "attempt_classification": classification,
+            "provider_credits_estimated": credits.get("estimated_total_credits"),
+            "provider_settlement_state": settlement.get("state"),
+            "progress": progress,
+        }
     manifest = read_json(path / "manifest.json") or {}
     job = job_status(run_id) or {}
     error = archive_error(manifest) or job.get("error")
@@ -574,10 +873,62 @@ def run_snapshot(run_id: str) -> dict[str, Any]:
     }
 
 
+def materialization_page(run_id: str, *, after: int = 0, limit: int = 100) -> dict[str, Any]:
+    """Page hash-checked generated paths without flooding the live event feed."""
+    if after < 0 or not 1 <= limit <= 200:
+        raise ValueError("Invalid materialization range")
+    if not _path_story(run_id):
+        raise FileNotFoundError(run_id)
+    try:
+        path = run_path(run_id)
+    except FileNotFoundError:
+        if run_id in _pending_path_story():
+            return {"items": [], "total": 0, "has_more": False, "next_after": after,
+                    "verified": False, "available": False}
+        raise
+    manifest = _controller_manifest(path)
+    if not manifest:
+        return {"items": [], "total": 0, "has_more": False, "next_after": after,
+                "verified": False, "available": False}
+    inventory_path = path / "materialization-inventory.json"
+    artifacts = manifest.get("artifact_sha256") if isinstance(manifest.get("artifact_sha256"), dict) else {}
+    expected = artifacts.get(inventory_path.name)
+    if (not inventory_path.is_file() or inventory_path.is_symlink() or not isinstance(expected, str)
+            or hashlib.sha256(inventory_path.read_bytes()).hexdigest() != expected):
+        raise ValueError("Materialization archive hash differs")
+    inventory = read_json(inventory_path) or {}
+    items = inventory.get("items")
+    replay = manifest.get("replay") if isinstance(manifest.get("replay"), dict) else {}
+    if (not isinstance(items, list) or replay.get("materialized_nodes") != len(items)
+            or any(not isinstance(item, dict) or not isinstance(item.get("path"), str)
+                   or not isinstance(item.get("inventory_index"), int) for item in items)):
+        raise ValueError("Materialization inventory differs from replay")
+    selected = items[after:after + limit]
+    next_after = after + len(selected)
+    return {"items": selected, "total": len(items), "has_more": next_after < len(items),
+            "next_after": next_after, "verified": True, "available": True}
+
+
 def provisional_snapshot(run_id: str) -> dict[str, Any] | None:
     job = job_status(run_id)
     if job is None:
-        return None
+        admission = _pending_path_story().get(run_id) if _path_story(run_id) else None
+        if admission is None:
+            return None
+        caps = admission.get("trial_caps", {})
+        return {
+            "run_id": run_id, "experiment": "2B", "mode": "path_story_pilot",
+            "arm": admission.get("arm"), "provider": admission.get("provider"),
+            "decoy_protocol": "filesystem-path-story-v1", "status": "queued",
+            "started_utc": admission.get("started_utc"), "agent_started_utc": None,
+            "finished_utc": None, "termination_reason": None, "error": None,
+            "max_wall_seconds": caps.get("maximum_total_wall_seconds"),
+            "experimental_result": False, "event_count": 0, "score": None, "job": {},
+            "pilot_id": admission.get("pilot_id"), "pilot_protocol": admission.get("pilot_protocol"),
+            "slot": admission.get("slot"), "block": admission.get("block"),
+            "attempt_classification": None, "provider_credits_estimated": None,
+            "provider_settlement_state": None, "progress": None,
+        }
     return {
         "run_id": run_id, "experiment": job.get("experiment"),
         "mode": job.get("mode"), "arm": job.get("arm"), "provider": job.get("provider"),

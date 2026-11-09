@@ -185,7 +185,8 @@ class DashboardFirstSliceTests(unittest.TestCase):
             with patch.object(core, "RUNS", root):
                 events = core.Collector().collect(run_id)
                 self.assertEqual(len(events), 2)
-                indexed = (run_dir / "monitor-events.jsonl").read_text()
+                indexed = core.monitor_index_path(run_id).read_text()
+                self.assertFalse((run_dir / "monitor-events.jsonl").exists())
                 self.assertNotIn(nonce, indexed)
                 self.assertNotIn(cookie, indexed)
                 self.assertIn("[redacted]", indexed)
@@ -219,7 +220,7 @@ class DashboardFirstSliceTests(unittest.TestCase):
                 self.assertEqual(collector.collect(run_id), first)
                 self.assertEqual(len({event["source_key"] for event in first}), 2)
                 self.assertEqual(len({event["episode_id"] for event in first}), 2)
-                indexed = (run_dir / "monitor-events.jsonl").read_text()
+                indexed = core.monitor_index_path(run_id).read_text()
                 for episode in episodes:
                     self.assertNotIn(episode, indexed)
                 for event in first:
@@ -325,7 +326,7 @@ class DashboardFirstSliceTests(unittest.TestCase):
                 event = core.Collector().collect(run_id)[0]
                 self.assertIn("[display truncated]", event["detail"]["text"])
                 self.assertEqual(core.raw_event_record(run_id, event["event_id"])["record"]["text"], full_text)
-                (run_dir / "monitor-events.jsonl").write_text(json.dumps({
+                core.monitor_index_path(run_id).write_text(json.dumps({
                     "event_id": 1, "source_key": "tampered", "raw_ref": {"file": "../.env", "line": 1},
                 }) + "\n")
                 with self.assertRaises(FileNotFoundError):
