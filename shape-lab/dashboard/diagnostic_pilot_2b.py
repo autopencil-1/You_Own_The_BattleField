@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -14,9 +15,19 @@ from .core import JOBS, RUNS, key_configured, private_json, read_json, utc_now
 
 
 def _controller():
-    from experiment_controller import path_story_diagnostic_2b_pro_v1
+    from experiment_controller import path_story_diagnostic_2b_pro_recovery_v1
 
-    return path_story_diagnostic_2b_pro_v1
+    return path_story_diagnostic_2b_pro_recovery_v1
+
+
+def _reconciled_exposure(current: dict[str, Any], run_id: str) -> bool:
+    """Trust only the recovery overlay's exact, reverified DNS reconciliation."""
+    if current.get("reconciled_incomplete_run_id") != run_id:
+        return False
+    digest = current.get("dns_reconciliation_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return False
+    return _controller().verify_reconciled_exposure(run_id, digest) is True
 
 
 def _unreconciled_provider_exposure(current: dict[str, Any]) -> str | None:
@@ -35,7 +46,7 @@ def _unreconciled_provider_exposure(current: dict[str, Any]) -> str | None:
             return "Diagnostic attempt identity differs"
         manifest = read_json(RUNS / run_id / "attempt-manifest.json")
         settlement = manifest.get("provider_settlement") if isinstance(manifest, dict) else None
-        if not isinstance(settlement, dict) or settlement.get("state") != "complete":
+        if (not isinstance(settlement, dict) or settlement.get("state") != "complete") and not _reconciled_exposure(current, run_id):
             return f"Run {run_id} has incomplete provider settlement; reconcile credentials and cost before another attempt"
     return None
 
@@ -92,8 +103,18 @@ def launch_next(current: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError(f"Another dashboard run is active: {active}")
         # Admission is rechecked after the local queue lock to narrow stale-status races.
         admitted = public_status()
-        if not admitted.get("launch_available") or admitted.get("next_slot") != current.get("next_slot"):
+        if (not admitted.get("launch_available") or admitted.get("next_slot") != current.get("next_slot")
+                or admitted.get("execution_overlay") != current.get("execution_overlay")
+                or admitted.get("dns_reconciliation_sha256") != current.get("dns_reconciliation_sha256")
+                or admitted.get("reconciled_incomplete_run_id") != current.get("reconciled_incomplete_run_id")):
             raise RuntimeError(str(admitted.get("launch_reason") or "Diagnostic assignment changed"))
+        reconciled_run_id = admitted.get("reconciled_incomplete_run_id")
+        digest = admitted.get("dns_reconciliation_sha256")
+        if (not isinstance(reconciled_run_id, str) or not isinstance(digest, str)
+                or not _reconciled_exposure(admitted, reconciled_run_id)
+                or not isinstance(admitted.get("execution_overlay"), str)
+                or not admitted["execution_overlay"]):
+            raise RuntimeError("Diagnostic recovery overlay is unavailable")
         job_id = "2b-diag-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(3)
         folder = JOBS / job_id
         folder.mkdir(parents=True, mode=0o700)
@@ -103,6 +124,9 @@ def launch_next(current: dict[str, Any]) -> dict[str, Any]:
             "kind": "path_story_diagnostic_v2_pro",
             "pilot_id": controller.PILOT_ID,
             "schedule_sha256": admitted["schedule_sha256"],
+            "execution_overlay": admitted["execution_overlay"],
+            "dns_reconciliation_sha256": digest,
+            "reconciled_incomplete_run_id": reconciled_run_id,
             "slot": admitted.get("next_slot"),
             "baseline_admissions": baseline,
         })

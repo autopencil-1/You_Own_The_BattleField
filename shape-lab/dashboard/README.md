@@ -41,6 +41,17 @@ limits. It starts one B3 attempt per explicit action and does not terminate an
 active run for credit admission. The earlier diagnostic schedule remains
 unchanged and should not be used for further execution.
 
+The Pro B3 continuation's first replacement ended in provider HTTP 429. Its
+second replacement ended after a DNS `gaierror` on request 25. A separate
+`pro_b3_dns_recovery_v1` overlay pins that exact archive, counts the 24
+successful responses as 79.807400000 estimated credits, and keeps the run
+infrastructure-invalid. It infers no provider call for request 25 from the
+DNS error and pinned gateway code; it does not claim an independent provider
+charge receipt. The signed reconciliation is the only exception to the
+dashboard's incomplete-settlement pause. All other incomplete attempts still
+block a new launch. The frozen schedule, old controller, and run archives
+remain unchanged.
+
 ## Start
 
 From the repository root, put a nonempty `ZAI_API_KEY` or `OLLAMA_API_KEY` in `.env`.
@@ -90,10 +101,9 @@ and archives the attempt. A stopped attempt is infrastructure-invalid and may
 remain visible as **stopping** while those steps finish. Stop does not kill the
 controller worker or guarantee an immediate end to billing or finalization.
 If an attempt has incomplete provider settlement, the dashboard blocks another
-diagnostic launch even when the frozen controller estimates zero credits. The
-operator must investigate and reconcile that exposure under a new versioned
-record before another attempt; a key being present in `.env` is not proof that
-the provider accepted it.
+diagnostic launch until an exact versioned reconciliation is verified. This
+also applies when the controller estimates zero credits; a key being present
+in `.env` is not proof that the provider accepted it.
 The separate
 **Engineering checks** action opens the B0 connectivity and model-free fixture
 settings. Those checks can reuse existing images or rebuild after source edits,

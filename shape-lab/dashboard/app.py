@@ -18,8 +18,9 @@ from .core import (RunRequest, JOBS, UI_DIST, capabilities, collector,
                    run_path, run_snapshot)
 from .jobs import launch_run
 from .pilot_2b import PILOT_ID as PATH_STORY_PILOT_ID, launch_next, public_status
-from .diagnostic_pilot_2b import _controller as diagnostic_controller, launch_next as launch_diagnostic_next, public_status as diagnostic_public_status
+from .diagnostic_pilot_2b import launch_next as launch_diagnostic_next, public_status as diagnostic_public_status
 from .diagnostic_stop_2b import request_stop as request_diagnostic_stop
+from experiment_controller.path_story_diagnostic_2b_pro_v1 import PILOT_ID as PRO_DIAGNOSTIC_PILOT_ID
 
 
 app = FastAPI(title="SHAPE experiment console", docs_url=None, redoc_url=None)
@@ -132,7 +133,7 @@ async def path_story_diagnostic_status() -> dict:
         return await asyncio.to_thread(diagnostic_public_status)
     except Exception as exc:
         return {
-            "pilot_id": diagnostic_controller().PILOT_ID,
+            "pilot_id": PRO_DIAGNOSTIC_PILOT_ID,
             "phase": "integrity_error",
             "launch_available": False,
             "launch_reason": f"Diagnostic integrity check failed: {type(exc).__name__}: {exc}",

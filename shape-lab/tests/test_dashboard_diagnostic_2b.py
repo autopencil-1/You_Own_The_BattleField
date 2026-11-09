@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import HTTPException, Request
 
@@ -54,9 +54,13 @@ class DashboardDiagnosticTests(unittest.TestCase):
             self.assertNotIn(hidden, current)
 
     def test_launch_queues_only_one_admitted_attempt(self) -> None:
+        digest = "d" * 64
         current = {
             "pilot_id": controller.PILOT_ID, "schedule_sha256": "b" * 64,
             "next_slot": 3, "launch_available": True,
+            "execution_overlay": "pro_b3_dns_recovery_v1",
+            "dns_reconciliation_sha256": digest,
+            "reconciled_incomplete_run_id": "2b-path-20261109193436-22dfcb",
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -67,6 +71,10 @@ class DashboardDiagnosticTests(unittest.TestCase):
             (admissions / "previous.json").write_text("{}", encoding="utf-8")
             with patch.object(pilot, "JOBS", jobs_dir), \
                     patch.object(pilot, "RUNS", runs), \
+                    patch.object(pilot, "_controller", return_value=SimpleNamespace(
+                        PILOT_ID=controller.PILOT_ID,
+                        verify_reconciled_exposure=lambda run_id, sha: (
+                            run_id == current["reconciled_incomplete_run_id"] and sha == digest))), \
                     patch.object(jobs, "JOBS", jobs_dir), \
                     patch.object(jobs, "_active_job", return_value=None), \
                     patch.object(pilot, "public_status", return_value=current), \
@@ -76,6 +84,9 @@ class DashboardDiagnosticTests(unittest.TestCase):
             request = core.read_json(jobs_dir / response["job_id"] / "request.json")
             self.assertEqual(request["baseline_admissions"], ["previous.json"])
             self.assertEqual(request["slot"], 3)
+            self.assertEqual(request["execution_overlay"], current["execution_overlay"])
+            self.assertEqual(request["dns_reconciliation_sha256"], digest)
+            self.assertEqual(request["reconciled_incomplete_run_id"], current["reconciled_incomplete_run_id"])
             self.assertNotIn("arm", request)
             self.assertNotIn("seed", request)
             spawn.assert_called_once()
@@ -95,6 +106,43 @@ class DashboardDiagnosticTests(unittest.TestCase):
         self.assertIn(run_id, reason)
         self.assertIn("incomplete provider settlement", reason)
 
+    def test_only_exact_verified_dns_exposure_is_exempted(self) -> None:
+        reconciled = "2b-path-20261109193436-22dfcb"
+        other = "2b-path-20261110000001-a1b2c3"
+        digest = "d" * 64
+        verify = Mock(return_value=True)
+        state = {
+            "reconciled_incomplete_run_id": reconciled,
+            "dns_reconciliation_sha256": digest,
+            "invalid_attempts": [{"run_id": reconciled, "slot": 3,
+                                  "reason": "controller_error"}],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            runs = Path(temporary) / "runs"
+            for run_id in (reconciled, other):
+                core.private_json(runs / run_id / "attempt-manifest.json", {
+                    "provider_settlement": {"state": "incomplete", "unaccounted_request_ids": [25]},
+                })
+            with patch.object(pilot, "RUNS", runs), \
+                    patch.object(pilot, "_controller", return_value=SimpleNamespace(
+                        verify_reconciled_exposure=verify)):
+                self.assertIsNone(pilot._unreconciled_provider_exposure(state))
+                verify.assert_called_once_with(reconciled, digest)
+                verify.reset_mock()
+                blocked = pilot._unreconciled_provider_exposure({
+                    **state, "invalid_attempts": state["invalid_attempts"] + [
+                        {"run_id": other, "slot": 3, "reason": "controller_error"}],
+                })
+                self.assertIn(other, blocked)
+                verify.assert_called_once_with(reconciled, digest)
+                verify.reset_mock()
+                self.assertIn(reconciled, pilot._unreconciled_provider_exposure({
+                    **state, "dns_reconciliation_sha256": "invalid",
+                }))
+                verify.assert_not_called()
+                verify.return_value = False
+                self.assertIn(reconciled, pilot._unreconciled_provider_exposure(state))
+
     def test_worker_finds_only_matching_committed_admission(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -109,6 +157,39 @@ class DashboardDiagnosticTests(unittest.TestCase):
             with patch.object(worker, "LAB", root):
                 self.assertEqual(worker._admitted_run(request), newest)
                 self.assertIsNone(worker._admitted_run({**request, "slot": 4}))
+
+    def test_worker_rechecks_queued_recovery_identity(self) -> None:
+        run_id = "2b-path-20261109193436-22dfcb"
+        digest = "d" * 64
+        request = {
+            "pilot_id": controller.PILOT_ID, "schedule_sha256": "b" * 64,
+            "slot": 3, "execution_overlay": "pro_b3_dns_recovery_v1",
+            "dns_reconciliation_sha256": digest,
+            "reconciled_incomplete_run_id": run_id,
+        }
+        opening = {**request, "next_slot": 3, "launch_available": True}
+        verify = Mock(return_value=True)
+        fake = SimpleNamespace(status=lambda: opening,
+                               verify_reconciled_exposure=verify)
+        worker._verify_recovery_request(request, fake)
+        verify.assert_called_once_with(run_id, digest)
+        with self.assertRaisesRegex(RuntimeError, "overlay changed"):
+            worker._verify_recovery_request({**request, "execution_overlay": "wrong"}, fake)
+        verify.return_value = False
+        with self.assertRaisesRegex(RuntimeError, "overlay changed"):
+            worker._verify_recovery_request(request, fake)
+
+    def test_api_status_remains_blocked_when_recovery_import_fails(self) -> None:
+        async def run_inline(function, *args):
+            return function(*args)
+
+        with patch.object(app.asyncio, "to_thread", side_effect=run_inline), \
+                patch.object(app, "diagnostic_public_status", side_effect=ImportError("recovery unavailable")):
+            unavailable = asyncio.run(app.path_story_diagnostic_status())
+        self.assertEqual(unavailable["pilot_id"], controller.PILOT_ID)
+        self.assertEqual(unavailable["phase"], "integrity_error")
+        self.assertFalse(unavailable["launch_available"])
+        self.assertIn("recovery unavailable", unavailable["launch_reason"])
 
     def test_stop_api_requires_local_session_token(self) -> None:
         async def run_inline(function, *args):

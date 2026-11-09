@@ -42,6 +42,23 @@ def _admitted_run(request: dict[str, Any]) -> dict[str, Any] | None:
     return next(iter(found.values())) if len(found) == 1 else None
 
 
+def _verify_recovery_request(request: dict[str, Any], controller: Any) -> None:
+    """Reject a queued request if the verified recovery overlay has changed."""
+    opening = controller.status()
+    run_id = request.get("reconciled_incomplete_run_id")
+    digest = request.get("dns_reconciliation_sha256")
+    if (opening.get("launch_available") is not True
+            or opening.get("pilot_id") != request.get("pilot_id")
+            or opening.get("schedule_sha256") != request.get("schedule_sha256")
+            or opening.get("next_slot") != request.get("slot")
+            or opening.get("execution_overlay") != request.get("execution_overlay")
+            or opening.get("dns_reconciliation_sha256") != digest
+            or opening.get("reconciled_incomplete_run_id") != run_id
+            or not isinstance(run_id, str) or not isinstance(digest, str)
+            or controller.verify_reconciled_exposure(run_id, digest) is not True):
+        raise RuntimeError("Diagnostic recovery overlay changed before worker admission")
+
+
 def main(job_id: str) -> int:
     if not RUN_ID_RE.fullmatch(job_id) or not job_id.startswith("2b-diag-"):
         return 2
@@ -67,6 +84,7 @@ def main(job_id: str) -> int:
 
         def execute_one() -> None:
             try:
+                _verify_recovery_request(request, controller)
                 outcome["controller_status"] = controller.execute()
             except Exception as exc:
                 traceback.print_exc()
