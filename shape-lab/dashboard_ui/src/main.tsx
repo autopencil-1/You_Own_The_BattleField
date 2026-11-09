@@ -96,13 +96,22 @@ type PathStoryPilotStatus = {
 type PilotJob = { job_id?: string; status: string; run_id?: string | null; error?: string | null }
 type DiagnosticStatus = {
   pilot_id?: string
+  pilot_protocol?: string
   phase: string
   valid_runs?: number
   scheduled_runs?: number
   invalid_attempts?: Array<unknown>
   next_slot?: number | null
   pending_run?: { run_id: string; stop_requested?: boolean; stop_retry_available?: boolean } | null
-  credits?: { remaining_total?: string | null; rate_limit_pause_until_utc?: string | null } | null
+  credits?: {
+    plan_tier?: string | null
+    pilot_total_share?: string | null
+    pilot_five_hour_share?: string | null
+    minimum_uncommitted_per_new_run?: string | null
+    remaining_total?: string | null
+    remaining_rolling_five_hour?: string | null
+    rate_limit_pause_until_utc?: string | null
+  } | null
   launch_available: boolean
   launch_reason?: string | null
 }
@@ -347,7 +356,9 @@ function App() {
   const modalOpen = form !== null
   const pathStory = snapshot?.run_id === runId && snapshot?.experiment === '2B' &&
     (snapshot.mode === 'path_story_pilot' || snapshot.pilot_protocol?.startsWith('2b-path-story') === true)
-  const diagnosticRun = pathStory && snapshot?.pilot_id?.includes('diagnostic-v1') === true
+  const proDiagnosticPilot = diagnosticStatus?.pilot_id?.includes('diagnostic-v2-pro') === true
+  const proDiagnosticRun = pathStory && snapshot?.pilot_id?.includes('diagnostic-v2-pro') === true
+  const diagnosticRun = pathStory && (snapshot?.pilot_id?.includes('diagnostic-v1') === true || proDiagnosticRun)
   const diagnosticStopRequested = diagnosticRun && (snapshot?.diagnostic_stop_requested === true || diagnosticStopRunId === runId)
   const diagnosticStopRetryAvailable = diagnosticRun && snapshot?.diagnostic_stop_retry_available === true
 
@@ -872,7 +883,7 @@ function App() {
         </article>)}
       </div>
       <section className="diagnostic-panel" aria-label="B3 diagnostic continuation">
-        <div className="diagnostic-header"><div><p className="eyebrow">SEPARATE 2B SCHEDULE</p><h2>B3 diagnostic continuation</h2><p>Runs here examine the path-story setup under a separate diagnostic schedule. They do not fill the original frozen v5 pilot slots.</p></div><span>MODEL-BACKED · Z.AI</span></div>
+        <div className="diagnostic-header"><div><p className="eyebrow">SEPARATE 2B SCHEDULE</p><h2>{proDiagnosticPilot ? 'Pro B3 diagnostic' : 'B3 diagnostic continuation'}</h2><p>{proDiagnosticPilot ? 'One B3 assignment under the Pro credit share. Results stay separate from the frozen v5 pilot and the earlier diagnostic v1 attempt.' : 'Runs here examine the path-story setup under a separate diagnostic schedule. They do not fill the original frozen v5 pilot slots.'}</p></div><span>MODEL-BACKED · Z.AI{proDiagnosticPilot ? ' PRO' : ''}</span></div>
         <div className="diagnostic-body">
           <div className="diagnostic-facts" aria-live="polite">
             {diagnosticStatus ? <>
@@ -884,7 +895,10 @@ function App() {
           </div>
           <div className="diagnostic-detail">
             {diagnosticStatus?.pilot_id && <span className="pilot-id">{diagnosticStatus.pilot_id}</span>}
-            {diagnosticStatus?.credits?.remaining_total && <span>Estimated pilot credit share remaining: {diagnosticStatus.credits.remaining_total}</span>}
+            {proDiagnosticPilot && <span className="diagnostic-budget">Pro local share: {diagnosticStatus?.credits?.pilot_five_hour_share || '6,000'} credits / rolling 5 hours · {diagnosticStatus?.credits?.pilot_total_share || '15,000'} credits / study</span>}
+            {proDiagnosticPilot && diagnosticStatus?.credits?.minimum_uncommitted_per_new_run && <span>Start reserve: {diagnosticStatus.credits.minimum_uncommitted_per_new_run} credits</span>}
+            {diagnosticStatus?.credits?.remaining_total && <span>Estimated study share remaining: {diagnosticStatus.credits.remaining_total} credits{diagnosticStatus.credits.remaining_rolling_five_hour ? ` · rolling share ${diagnosticStatus.credits.remaining_rolling_five_hour}` : ''}</span>}
+            {proDiagnosticPilot && <span>The earlier 401 attempt stays invalid; its no-charge account report is operator-provided.</span>}
             {diagnosticStatus?.phase === 'paused_provider_rate_limit' && diagnosticStatus.credits?.rate_limit_pause_until_utc && <span>Rate-limit pause until {timestamp(diagnosticStatus.credits.rate_limit_pause_until_utc)}</span>}
             {diagnosticStatus?.pending_run?.stop_requested && <span>{diagnosticStatus.pending_run.stop_retry_available ? 'Stop command failed; open the run and retry.' : 'Stop requested; waiting for settlement and archive finalization.'}</span>}
             {!diagnosticStatus?.launch_available && diagnosticStatus?.launch_reason && <span className="pilot-launch-reason">{diagnosticStatus.launch_reason}</span>}
@@ -893,7 +907,7 @@ function App() {
             {diagnosticJobId && <span>Starting the next diagnostic assignment…</span>}
           </div>
           <div className="diagnostic-actions">
-            <button className="primary-button" disabled={!diagnosticStatus?.launch_available || diagnosticLaunching || Boolean(diagnosticJobId) || pilotLaunching || Boolean(pilotJobId)} onClick={launchDiagnostic}>{diagnosticLaunching || diagnosticJobId ? 'Starting diagnostic…' : 'Run next diagnostic trial'} <span>→</span></button>
+            <button className="primary-button" disabled={!diagnosticStatus?.launch_available || diagnosticLaunching || Boolean(diagnosticJobId) || pilotLaunching || Boolean(pilotJobId)} onClick={launchDiagnostic}>{diagnosticLaunching || diagnosticJobId ? 'Starting diagnostic…' : proDiagnosticPilot ? 'Run Pro B3 trial' : 'Run next diagnostic trial'} <span>→</span></button>
             <button type="button" className="pilot-refresh" disabled={diagnosticStatusLoading} onClick={() => setDiagnosticStatusRefresh(previous => previous + 1)}>Refresh status</button>
             {diagnosticStatus?.pending_run?.run_id && <button type="button" className="pilot-pending-link" onClick={() => navigate(diagnosticStatus.pending_run!.run_id)}>View active diagnostic run {diagnosticStatus.pending_run.run_id} ↗</button>}
           </div>
@@ -921,7 +935,7 @@ function App() {
             {pathStory && typeof snapshot?.slot === 'number' && <span>Slot {snapshot.slot}</span>}
             {pathStory && typeof snapshot?.block === 'number' && <span>Block {snapshot.block}</span>}
             <span>{snapshot?.provider?.toUpperCase() || 'MODEL-FREE'}</span>
-            <span>{diagnosticRun ? 'DIAGNOSTIC · EXCLUDED FROM V5' : pathStory ? 'PILOT OBSERVATION' : snapshot?.experimental_result ? 'EXPERIMENTAL' : 'ENGINEERING / FIXTURE'}</span>
+            <span>{proDiagnosticRun ? 'PRO B3 DIAGNOSTIC · EXCLUDED FROM V5/V1' : diagnosticRun ? 'DIAGNOSTIC · EXCLUDED FROM V5' : pathStory ? 'PILOT OBSERVATION' : snapshot?.experimental_result ? 'EXPERIMENTAL' : 'ENGINEERING / FIXTURE'}</span>
             {pathStory && snapshot?.attempt_classification && (!diagnosticRun || snapshot.attempt_classification === 'infrastructure_invalid') && <span className={snapshot.attempt_classification === 'infrastructure_invalid' ? 'pilot-invalid' : ''}>{snapshot.attempt_classification.replaceAll('_', ' ')}</span>}
           </div>
           {pathStory && snapshot?.pilot_id && <p className="pilot-identity">Pilot {snapshot.pilot_id}</p>}
@@ -931,7 +945,7 @@ function App() {
       {snapshot?.mode === 'deterministic_fixture' || snapshot?.mode === 'deterministic' ? <div className="fixture-banner">MODEL-FREE FIXTURE CHECK <span>•</span> No autonomous agent is launched in this mode. Server events are live evidence of the check; agent activity is available in archived agent runs.</div> : null}
       {snapshot?.mode === 'connectivity_fixture' || snapshot?.experiment === '2B' && snapshot?.mode === 'connectivity' ? <div className="fixture-banner">2B AGENT CONNECTIVITY CHECK <span>•</span> B0 uses generic fixture content. This is an engineering check, not a B0–B3 treatment result.</div> : null}
       {snapshot?.error && <div className="fixture-banner">RUN ERROR <span>•</span> {snapshot.error}</div>}
-      {pathStory && (diagnosticRun ? <div className="fixture-banner diagnostic-banner">2B DIAGNOSTIC CONTINUATION <span>•</span> This run is separate from the original frozen v5 pilot and does not fill its valid slots. A completed run is not a behavioral validity decision.</div> : <div className="fixture-banner">2B PATH-STORY PILOT <span>•</span> This page monitors a frozen pilot attempt. The pilot controller decides whether an attempt counts; this page does not launch or reschedule assignments.</div>)}
+      {pathStory && (diagnosticRun ? <div className="fixture-banner diagnostic-banner">{proDiagnosticRun ? '2B PRO B3 DIAGNOSTIC' : '2B DIAGNOSTIC CONTINUATION'} <span>•</span> This run is separate from the original frozen v5 pilot{proDiagnosticRun ? ' and the earlier diagnostic v1 attempt' : ''} and does not fill their valid slots. A completed run is not a behavioral validity decision.</div> : <div className="fixture-banner">2B PATH-STORY PILOT <span>•</span> This page monitors a frozen pilot attempt. The pilot controller decides whether an attempt counts; this page does not launch or reschedule assignments.</div>)}
       {diagnosticRun && snapshot?.status === 'running' && <div className="diagnostic-stop-bar">
         <span>{diagnosticStopRetryAvailable ? 'The scoped Docker stop failed; the agent may still be running.' : diagnosticStopRequested ? 'Stop requested; waiting for provider settlement and archive finalization.' : 'This diagnostic run can be stopped. The controller will settle provider usage and preserve the attempt archive.'}</span>
         {(!diagnosticStopRequested || diagnosticStopRetryAvailable) && <button type="button" disabled={diagnosticStopLoading} onClick={stopDiagnostic}>{diagnosticStopLoading ? 'Requesting stop…' : diagnosticStopRetryAvailable ? 'Retry Stop' : 'Stop diagnostic run'}</button>}

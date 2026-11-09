@@ -12,7 +12,7 @@ from unittest.mock import patch
 from fastapi import HTTPException, Request
 
 from dashboard import app, core, diagnostic_pilot_2b as pilot, diagnostic_pilot_2b_worker as worker, jobs
-from experiment_controller import path_story_diagnostic_2b_v1 as controller
+from experiment_controller import path_story_diagnostic_2b_pro_v1 as controller
 from experiment_controller import path_story_pilot_2b_v2 as committed
 
 

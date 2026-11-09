@@ -49,8 +49,9 @@ class DiagnosticStopTests(unittest.TestCase):
                                    self.admission)
         committed._write_committed(self.schedule.parent / "pending-run.json", self.admission)
         for name, value in (("_diagnostic_paths", (diagnostic.PILOT_ID, self.schedule)),
+                            ("_pro_paths", ("unused-pro-pilot", self.lab / "studies" / "unused-pro-pilot" / "schedule.json")),
                             ("JOBS", self.lab / "runs" / ".dashboard-jobs")):
-            replacement = patch.object(stop, name, return_value=value) if name == "_diagnostic_paths" else patch.object(stop, name, value)
+            replacement = patch.object(stop, name, return_value=value) if name in {"_diagnostic_paths", "_pro_paths"} else patch.object(stop, name, value)
             replacement.start()
             self.addCleanup(replacement.stop)
 
@@ -213,6 +214,113 @@ class DiagnosticStopTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             stop.stop_requested(RUN_ID, diagnostic.PILOT_ID)
         self.assertFalse(stop.stop_requested(RUN_ID, "other-pilot"))
+
+
+class ProDiagnosticStopTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.lab = Path(temporary.name)
+        self.pilot_id = "2b-path-story-pilot-diagnostic-v2-pro-20261109154540-d08c59"
+        self.schedule = self.lab / "studies" / self.pilot_id / "schedule.json"
+        parent_path = self.lab / "studies" / diagnostic.PARENT_PILOT_ID / "schedule.json"
+        fingerprint = {"images": {"agent": IMAGE_ID}}
+        b3 = {"slot": 3, "block": 1, "arm": "B3", "seed": "fixed-seed"}
+        committed._write_committed(parent_path, {
+            "pilot_id": diagnostic.PARENT_PILOT_ID, "fingerprint": fingerprint,
+            "assignments": [b3],
+        })
+        parent_sha = hashlib.sha256(parent_path.read_bytes()).hexdigest()
+        committed._write_committed(self.schedule, {
+            "pilot_id": self.pilot_id,
+            "pilot_protocol": "2b-path-story-pilot-diagnostic-v2-pro",
+            "parent_pilot_id": diagnostic.PARENT_PILOT_ID,
+            "parent_schedule_sha256": parent_sha,
+            "fingerprint": fingerprint,
+            "assignments": [b3],
+        })
+        self.admission = {
+            "schema_version": 1,
+            "pilot_id": self.pilot_id,
+            "pilot_protocol": "2b-path-story-pilot-diagnostic-v2-pro",
+            "parent_pilot_id": diagnostic.PARENT_PILOT_ID,
+            "parent_schedule_sha256": parent_sha,
+            "schedule_sha256": hashlib.sha256(self.schedule.read_bytes()).hexdigest(),
+            "run_id": RUN_ID, "slot": 3,
+        }
+        committed._write_committed(self.schedule.parent / "admissions" / f"{RUN_ID}.json",
+                                   self.admission)
+        committed._write_committed(self.schedule.parent / "pending-run.json", self.admission)
+        for name, value in (("_diagnostic_paths", (diagnostic.PILOT_ID,
+                            self.lab / "studies" / diagnostic.PILOT_ID / "schedule.json")),
+                            ("_pro_paths", (self.pilot_id, self.schedule)),
+                            ("JOBS", self.lab / "runs" / ".dashboard-jobs")):
+            replacement = patch.object(stop, name, value) if name == "JOBS" else patch.object(stop, name, return_value=value)
+            replacement.start()
+            self.addCleanup(replacement.stop)
+
+    def _inspect(self, image: str = IMAGE_ID) -> str:
+        return json.dumps([{
+            "Id": CONTAINER_ID, "Image": image,
+            "Config": {"Labels": {
+                "com.docker.compose.project": "shape" + RUN_ID,
+                "com.docker.compose.service": "attacker-agent",
+            }, "Env": ["SHAPE_RUN_ID=" + RUN_ID]},
+            "State": {"Running": True},
+        }])
+
+    def test_pro_stop_resolves_its_own_signed_admission(self) -> None:
+        with patch.object(stop, "_docker", side_effect=[CONTAINER_ID,
+                                                        self._inspect(), CONTAINER_ID]) as docker:
+            outcome = stop.request_stop(RUN_ID)
+        self.assertEqual(outcome["pilot_id"], self.pilot_id)
+        self.assertEqual(outcome["state"], "stop_command_succeeded")
+        self.assertTrue(stop.stop_requested(RUN_ID, self.pilot_id))
+        self.assertFalse(stop.stop_requested(RUN_ID, diagnostic.PILOT_ID))
+        self.assertFalse(stop.stop_retry_available(RUN_ID, self.pilot_id))
+        self.assertEqual(docker.call_args_list[-1].args[0],
+                         ["docker", "stop", "--time", "5", CONTAINER_ID])
+        request = committed._read_committed(stop._request_path(self.schedule, RUN_ID))
+        self.assertEqual(request["slot"], 3)
+
+    def test_pro_stop_rejects_modified_fingerprint_before_docker(self) -> None:
+        study = committed._read_committed(self.schedule)
+        study["fingerprint"]["images"]["agent"] = "sha256:" + "c" * 64
+        self.schedule.unlink()
+        self.schedule.with_suffix(".sha256").unlink()
+        committed._write_committed(self.schedule, study)
+        admission = dict(self.admission)
+        admission["schedule_sha256"] = hashlib.sha256(self.schedule.read_bytes()).hexdigest()
+        for path in (self.schedule.parent / "admissions" / f"{RUN_ID}.json",
+                     self.schedule.parent / "pending-run.json"):
+            path.unlink()
+            path.with_suffix(".sha256").unlink()
+            committed._write_committed(path, admission)
+        with patch.object(stop, "_docker") as docker:
+            with self.assertRaises(stop.StopConflict):
+                stop.request_stop(RUN_ID)
+            docker.assert_not_called()
+
+    def test_pro_stop_rejects_non_b3_slot(self) -> None:
+        admission = dict(self.admission)
+        admission["slot"] = 4
+        for path in (self.schedule.parent / "admissions" / f"{RUN_ID}.json",
+                     self.schedule.parent / "pending-run.json"):
+            path.unlink()
+            path.with_suffix(".sha256").unlink()
+            committed._write_committed(path, admission)
+        with patch.object(stop, "_docker") as docker:
+            with self.assertRaises(stop.StopConflict):
+                stop.request_stop(RUN_ID)
+            docker.assert_not_called()
+
+    def test_pro_stop_rejects_ambiguous_study_admission(self) -> None:
+        other = self.lab / "studies" / diagnostic.PILOT_ID / "admissions" / f"{RUN_ID}.json"
+        committed._write_committed(other, {"run_id": RUN_ID})
+        with patch.object(stop, "_docker") as docker:
+            with self.assertRaisesRegex(stop.StopConflict, "more than one"):
+                stop.request_stop(RUN_ID)
+            docker.assert_not_called()
 
 
 if __name__ == "__main__":

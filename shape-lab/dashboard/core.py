@@ -67,8 +67,14 @@ def _path_story(run_id: str) -> bool:
     return run_id.startswith("2b-path-") and RUN_ID_RE.fullmatch(run_id) is not None
 
 
+def _diagnostic_pilot_id(pilot_id: object) -> bool:
+    return isinstance(pilot_id, str) and any(
+        tag in pilot_id for tag in ("-diagnostic-v1-", "-diagnostic-v2-pro-")
+    )
+
+
 def _diagnostic_stop_requested(run_id: str, pilot_id: object) -> bool:
-    if not isinstance(pilot_id, str) or "-diagnostic-v1-" not in pilot_id:
+    if not _diagnostic_pilot_id(pilot_id):
         return False
     from .diagnostic_stop_2b import stop_requested
 
@@ -76,7 +82,7 @@ def _diagnostic_stop_requested(run_id: str, pilot_id: object) -> bool:
 
 
 def _diagnostic_stop_retry_available(run_id: str, pilot_id: object) -> bool:
-    if not isinstance(pilot_id, str) or "-diagnostic-v1-" not in pilot_id:
+    if not _diagnostic_pilot_id(pilot_id):
         return False
     from .diagnostic_stop_2b import stop_retry_available
 

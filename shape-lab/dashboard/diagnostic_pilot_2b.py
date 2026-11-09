@@ -1,4 +1,4 @@
-"""Dashboard admission for the separately recorded 2B diagnostic continuation."""
+"""Dashboard admission for the separately recorded Pro B3 continuation."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from .core import JOBS, RUNS, key_configured, private_json, read_json, utc_now
 
 
 def _controller():
-    from experiment_controller import path_story_diagnostic_2b_v1
+    from experiment_controller import path_story_diagnostic_2b_pro_v1
 
-    return path_story_diagnostic_2b_v1
+    return path_story_diagnostic_2b_pro_v1
 
 
 def _unreconciled_provider_exposure(current: dict[str, Any]) -> str | None:
@@ -100,7 +100,7 @@ def launch_next(current: dict[str, Any]) -> dict[str, Any]:
         admissions = RUNS.parent / "studies" / controller.PILOT_ID / "admissions"
         baseline = sorted(path.name for path in admissions.glob("*.json")) if admissions.is_dir() else []
         private_json(folder / "request.json", {
-            "kind": "path_story_diagnostic_v1",
+            "kind": "path_story_diagnostic_v2_pro",
             "pilot_id": controller.PILOT_ID,
             "schedule_sha256": admitted["schedule_sha256"],
             "slot": admitted.get("next_slot"),

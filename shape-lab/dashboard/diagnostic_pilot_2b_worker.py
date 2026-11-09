@@ -48,7 +48,7 @@ def main(job_id: str) -> int:
     folder = JOBS / job_id
     request = read_json(folder / "request.json") or {}
     controller = _controller()
-    if request.get("kind") != "path_story_diagnostic_v1" or request.get("pilot_id") != controller.PILOT_ID:
+    if request.get("kind") != "path_story_diagnostic_v2_pro" or request.get("pilot_id") != controller.PILOT_ID:
         return 2
     descriptor = os.open(JOBS / "active.lock", os.O_WRONLY | os.O_CREAT, 0o600)
     try:

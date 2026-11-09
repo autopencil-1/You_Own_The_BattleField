@@ -33,6 +33,40 @@ def _diagnostic_paths() -> tuple[str, Path]:
     return diagnostic.PILOT_ID, diagnostic.SCHEDULE
 
 
+def _pro_paths() -> tuple[str, Path]:
+    from experiment_controller import path_story_diagnostic_2b_pro_v1 as diagnostic
+
+    return diagnostic.PILOT_ID, diagnostic.SCHEDULE
+
+
+def _known_paths() -> tuple[tuple[str, Path], tuple[str, Path]]:
+    return _diagnostic_paths(), _pro_paths()
+
+
+def _pilot_paths(run_id: str, pilot_id: str | None = None) -> tuple[str, Path] | None:
+    """Resolve a run to one allowlisted diagnostic study, never by a caller path."""
+    choices = _known_paths()
+    if pilot_id is not None:
+        return next((row for row in choices if row[0] == pilot_id), None)
+    found = [row for row in choices if (
+        (row[1].parent / "admissions" / f"{run_id}.json").exists()
+        or (row[1].parent / "admissions" / f"{run_id}.sha256").exists()
+    )]
+    if len(found) > 1:
+        raise StopConflict("Run has more than one diagnostic study admission")
+    return found[0] if found else None
+
+
+def _allowed_slot(pilot_id: str, slot: object) -> bool:
+    if not isinstance(slot, int) or isinstance(slot, bool):
+        return False
+    if pilot_id == _diagnostic_paths()[0]:
+        return slot in range(3, 9)
+    if pilot_id == _pro_paths()[0]:
+        return slot == 3
+    return False
+
+
 def _read_committed(path: Path) -> dict[str, Any]:
     try:
         return committed._read_committed(path)
@@ -73,7 +107,7 @@ def _validate_request(record: dict[str, Any], run_id: str, pilot_id: str) -> Non
     if (record.get("schema_version") != 1 or record.get("pilot_id") != pilot_id
             or record.get("run_id") != run_id or record.get("actor") != "local_dashboard"
             or record.get("reason") != "operator_stop"
-            or not isinstance(slot, int) or isinstance(slot, bool) or slot not in range(3, 9)
+            or not _allowed_slot(pilot_id, slot)
             or record.get("project") != "shape" + run_id.lower()
             or not isinstance(record.get("container_id"), str)
             or re.fullmatch(r"[0-9a-f]{64}", record["container_id"]) is None):
@@ -83,9 +117,10 @@ def _validate_request(record: dict[str, Any], run_id: str, pilot_id: str) -> Non
 def stop_requested(run_id: str, pilot_id: str | None = None) -> bool:
     """Return true only for a valid, hash-committed operator request."""
     _validate_run_id(run_id)
-    fixed_pilot_id, schedule_path = _diagnostic_paths()
-    if pilot_id is not None and pilot_id != fixed_pilot_id:
+    selected = _pilot_paths(run_id, pilot_id)
+    if selected is None:
         return False
+    fixed_pilot_id, schedule_path = selected
     path = _request_path(schedule_path, run_id)
     if not path.exists() and not path.with_suffix(".sha256").exists():
         return False
@@ -141,7 +176,10 @@ def stop_retry_available(run_id: str, pilot_id: str | None = None) -> bool:
     """Expose a retry only after a signed stop failure while a run is pending."""
     if not stop_requested(run_id, pilot_id):
         return False
-    fixed_pilot_id, schedule_path = _diagnostic_paths()
+    selected = _pilot_paths(run_id, pilot_id)
+    if selected is None:
+        return False
+    fixed_pilot_id, schedule_path = selected
     outcome = _outcome_path(schedule_path, run_id)
     if outcome.exists() or outcome.with_suffix(".sha256").exists():
         _read_committed(outcome)
@@ -219,8 +257,11 @@ def _attacker_container(project: str, run_id: str, expected_image: str,
     return identifier, running
 
 
-def _admitted_context(run_id: str) -> tuple[str, Path, int, str]:
-    pilot_id, schedule_path = _diagnostic_paths()
+def _admitted_context(run_id: str, pilot_id: str | None = None) -> tuple[str, Path, int, str]:
+    selected = _pilot_paths(run_id, pilot_id)
+    if selected is None:
+        raise StopConflict("Run has no allowlisted diagnostic admission")
+    pilot_id, schedule_path = selected
     schedule = _read_committed(schedule_path)
     from experiment_controller import path_story_diagnostic_2b_v1 as diagnostic
 
@@ -234,6 +275,15 @@ def _admitted_context(run_id: str) -> tuple[str, Path, int, str]:
             or parent_schedule.get("pilot_id") != diagnostic.PARENT_PILOT_ID):
         raise StopConflict("Diagnostic parent schedule differs")
     fingerprint = parent_schedule.get("fingerprint")
+    if pilot_id == _pro_paths()[0]:
+        parent_assignments = parent_schedule.get("assignments")
+        parent_b3 = ([row for row in parent_assignments
+                      if isinstance(row, dict) and row.get("slot") == 3]
+                     if isinstance(parent_assignments, list) else [])
+        if (schedule.get("fingerprint") != fingerprint
+                or len(parent_b3) != 1 or parent_b3[0].get("arm") != "B3"
+                or schedule.get("assignments") != parent_b3):
+            raise StopConflict("Pro diagnostic B3 assignment or fingerprint differs from parent")
     images = fingerprint.get("images") if isinstance(fingerprint, dict) else None
     expected_image = images.get("agent") if isinstance(images, dict) else None
     if not isinstance(expected_image, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", expected_image) is None:
@@ -244,11 +294,13 @@ def _admitted_context(run_id: str) -> tuple[str, Path, int, str]:
     schedule_hash = _committed_sha(schedule)
     slot = admission.get("slot")
     assignments = schedule.get("assignments")
-    if (not isinstance(slot, int) or isinstance(slot, bool) or slot not in range(3, 9)
+    if (not _allowed_slot(pilot_id, slot)
             or admission.get("pilot_id") != pilot_id or admission.get("run_id") != run_id
             or admission.get("parent_pilot_id") != diagnostic.PARENT_PILOT_ID
             or admission.get("parent_schedule_sha256") != parent_hash
             or admission.get("schedule_sha256") != schedule_hash
+            or (schedule.get("pilot_protocol") is not None
+                and admission.get("pilot_protocol") != schedule.get("pilot_protocol"))
             or pending != admission
             or not isinstance(assignments, list)
             or sum(isinstance(row, dict) and row.get("slot") == slot for row in assignments) != 1):
@@ -261,7 +313,10 @@ def request_stop(run_id: str) -> dict[str, Any]:
     _validate_run_id(run_id)
     requested_utc = utc_now()
     with _stop_lock():
-        pilot_id, schedule_path = _diagnostic_paths()
+        selected = _pilot_paths(run_id)
+        if selected is None:
+            raise StopConflict("Run has no allowlisted diagnostic admission")
+        pilot_id, schedule_path = selected
         request_path = _request_path(schedule_path, run_id)
         outcome_path = _outcome_path(schedule_path, run_id)
         project = "shape" + run_id.lower()
@@ -289,7 +344,7 @@ def request_stop(run_id: str) -> dict[str, Any]:
                         "stop_requested": True, "state": outcome.get("state"),
                         "retry_available": False, "repeated": True}
             try:
-                _, _, slot, expected_image = _admitted_context(run_id)
+                _, _, slot, expected_image = _admitted_context(run_id, pilot_id)
             except StopConflict:
                 # The runner may already have archived and cleared pending.
                 if (schedule_path.parent.parent.parent / "runs" / run_id / "result.json").is_file():
@@ -307,7 +362,7 @@ def request_stop(run_id: str) -> dict[str, Any]:
                 raise StopConflict("Attacker container changed after operator-stop request")
         else:
             failures = []
-            pilot_id, schedule_path, slot, expected_image = _admitted_context(run_id)
+            pilot_id, schedule_path, slot, expected_image = _admitted_context(run_id, pilot_id)
             identifier, running = _attacker_container(project, run_id, expected_image)
             if (schedule_path.parent.parent.parent / "runs" / run_id / "result.json").exists():
                 raise StopConflict("Diagnostic attempt was already archived")

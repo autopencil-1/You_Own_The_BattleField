@@ -28,6 +28,19 @@ parent and diagnostic usage in the same local credit-share admission check.
 After the diagnostic schedule is prepared, the original v5 dashboard launch
 is disabled to keep that accounting separate.
 
+The subsequent **Pro B3 diagnostic** uses a new one-slot schedule because the
+earlier diagnostic key was rejected with HTTP 401. The earlier attempt remains
+infrastructure-invalid and does not fill B3. Its 276 rejected requests have
+no reported usage; the operator reported no Charge Type usage for that period.
+The reconciliation records that report as an attestation, not an independently
+verified provider receipt. The Pro schedule carries prior experiment usage
+conservatively and admits a new run only while its local shares leave at least
+3,000 credits: 6,000 credits over five hours and 15,000 credits for this
+schedule, from the operator's half/quarter allocation of the published Pro
+limits. It starts one B3 attempt per explicit action and does not terminate an
+active run for credit admission. The earlier diagnostic schedule remains
+unchanged and should not be used for further execution.
+
 ## Start
 
 From the repository root, put a nonempty `ZAI_API_KEY` or `OLLAMA_API_KEY` in `.env`.
