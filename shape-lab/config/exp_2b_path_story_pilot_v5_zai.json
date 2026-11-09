@@ -1,0 +1,245 @@
+{
+  "agent": {
+    "backend": "claude",
+    "effort": "max",
+    "model": "glm-5.3"
+  },
+  "attempt_bounds": {
+    "claude_retry_count": 0,
+    "gateway_429_retry_count": 0,
+    "max_attempts_per_task": 500,
+    "max_supervisor_attempts": 500,
+    "structured_output_retry_count": null,
+    "structured_output_retry_count_status": "provider_managed_not_exposed"
+  },
+  "block_seeds": {
+    "1": "path-story-pilot-v1-block-01",
+    "2": "path-story-pilot-v1-block-02"
+  },
+  "catalog_fingerprint": "7cb9d96bf7c7d17fa38b8fe1708827e4fa21abd044c88770a091da80b61047a2",
+  "coding_plan_credit_governance": {
+    "active_run_credit_termination_allowed": false,
+    "admission_between_runs_only": true,
+    "authorization_basis": "user_half_five_hour_quarter_total_2026-11-09",
+    "cached_input_multiplier": "1.7",
+    "estimate_is_provider_bill": false,
+    "five_hour_accounting": "rolling_own_attempts_using_completion_timestamps",
+    "five_hour_and_weekly_limits_apply": true,
+    "input_multiplier": "6.9",
+    "live_balance_source": "subscriber_console_manual_snapshot_required",
+    "minimum_uncommitted_credits_per_new_run": 7500,
+    "model": "glm-5.3",
+    "off_peak_multiplier": "0.5",
+    "ollama_dollar_tranche_transfer": "not_applicable",
+    "output_multiplier": "24",
+    "peak_end_hour_utc": 10,
+    "peak_start_hour_utc": 6,
+    "peak_weekdays_utc": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "pilot_five_hour_share_credits": 14000,
+    "pilot_total_reset": "none",
+    "pilot_total_share_credits": 35000,
+    "plan_tier": "Max",
+    "provider_shared_usage_visible": false,
+    "published_five_hour_credits": 28000,
+    "published_weekly_credits": 140000,
+    "rate_revision": "zai-glm-5.3-coding-plan-2026-11-09",
+    "source_url": "https://docs.z.ai/devpack/overview",
+    "tokens_per_credit_unit": 10000
+  },
+  "contract_kind": "fresh_eight_slot_zai_coding_plan_pilot_v5",
+  "design": {
+    "arms": {
+      "B0": {
+        "reinforcement": false,
+        "structure": false
+      },
+      "B1": {
+        "reinforcement": false,
+        "structure": true
+      },
+      "B2": {
+        "reinforcement": true,
+        "structure": false
+      },
+      "B3": {
+        "reinforcement": true,
+        "structure": true
+      }
+    },
+    "balanced_blocks": 2,
+    "factorial": "2x2",
+    "freeze_all_assignments_before_execution": true,
+    "randomization": "independent_uniform_permutation_within_complete_block",
+    "randomization_unit": "run",
+    "required_valid_runs": 8,
+    "runs_are_serial": true,
+    "runs_per_arm": 2
+  },
+  "environment_protocol": "filesystem-path-story-v1",
+  "execution": {
+    "cohort_enrollment_decision": "fresh_eight_after_equal_millisecond_recovery",
+    "live_credit_balance_verified": false,
+    "model_runs_allowed": "only_after_local_credit_share_admission",
+    "schedule_freeze_available": true
+  },
+  "factorial_arms": {
+    "B0": {
+      "reinforcement": false,
+      "structure": false
+    },
+    "B1": {
+      "reinforcement": false,
+      "structure": true
+    },
+    "B2": {
+      "reinforcement": true,
+      "structure": false
+    },
+    "B3": {
+      "reinforcement": true,
+      "structure": true
+    }
+  },
+  "fixture_path": "config/exp_2b_path_story_v1.json",
+  "fixture_sha256": "8d87bb7454935bd60c7e07e15909fb84f7f197036fe4f9178d1a25c359cb1f73",
+  "gateway_lifecycle_candidate": {
+    "behavioral_validity_rule": "not_frozen",
+    "cost_complete_requires_matching_provider_usage": true,
+    "downstream_delivery_failed_event": "downstream_delivery_failed",
+    "downstream_send_must_be_bounded": true,
+    "provider_response_complete_after_full_upstream_read": true,
+    "provider_response_complete_event": "provider_response_complete",
+    "unaccounted_or_aborted_provider_requests_pause": true
+  },
+  "model": "glm-5.3",
+  "model_free_gate": {
+    "matrix_config_sha256": "03d845aa4cc570483eaaeb3abe42e8aef1f3633a5ea38d16cbee6b16c7335bf7",
+    "matrix_protocol": "2b-path-story-model-free-matrix-v1",
+    "matrix_report_path": "runs/path-story-matrix-v1-20261109-01/matrix-report.json",
+    "matrix_report_sha256": "7a208f6fc58af70639c6a0689224f7980936e8f6e34378134e773a9b39649f60"
+  },
+  "model_free_preflight": {
+    "arms": [
+      "B0",
+      "B3"
+    ],
+    "dummy_key_only": true,
+    "make_model_calls": false,
+    "start_attacker_agent": false
+  },
+  "pilot_protocol": "2b-path-story-pilot-v5-zai",
+  "post_run_settlement": {
+    "excluded_from_behavioral_clocks": true,
+    "gateway_settlement_grace_seconds": 190,
+    "minimum_quiet_seconds": 5,
+    "new_model_requests_allowed": false
+  },
+  "predecessor_v3_context": {
+    "attempt_manifest_sha256": "576defcd45a1b0c4ae132413e7a5b0f28ada645451c74ce664e822563282aa88",
+    "estimated_credits": "100.809835000",
+    "gateway_events_sha256": "bd02de81c82953e114f9eeda915ef188df0e8e55e1ed433eae188e241bcad1ee",
+    "invalid_run_id": "2b-path-20261109124816-55aca0",
+    "pilot_id": "2b-path-story-pilot-v3-zai-20261109124716-3c0485",
+    "schedule_sha256": "32af55e9b613d25d80ea8e3c386f5d0cf1be85a86e87b95e2fd35edb660bf9c5",
+    "valid_slots_carried_forward": []
+  },
+  "predecessor_v4_context": {
+    "attempts": [
+      {
+        "attempt_manifest_sha256": "5d25b29e36a31fac9e0e23c965172296f9bed7f79ecc211cba29ffc8e0eb54f9",
+        "classification": "valid",
+        "estimated_credits": "256.759385000",
+        "gateway_events_sha256": "915b5c650907e50ad55d50a10c3cf157cb1ce5f906f3e5c44d9a637e4bdeb907",
+        "run_id": "2b-path-20261109150216-16d7a7",
+        "slot": 1
+      },
+      {
+        "attempt_manifest_sha256": "6b14c7126ed8be41a8bcc03f84ef7c197cfb4f7faac369163a0201874f28b276",
+        "classification": "valid",
+        "estimated_credits": "298.496680000",
+        "gateway_events_sha256": "2c021a44f42fc05e3cbb211282093b8888bc5132052013c06bd7a550e0c8eebc",
+        "run_id": "2b-path-20261109151433-6dd657",
+        "slot": 2
+      },
+      {
+        "attempt_manifest_sha256": "dea9b2404567539a11abe4963d621e331e54aad8d7d6e77d09e9f9fb3b715fdc",
+        "classification": "controller_error",
+        "estimated_credits": "261.976960000",
+        "gateway_events_sha256": "00270647263ca80d8d4836a7d664337777a83b3f7af669df9f8d5b8a826ba44b",
+        "run_id": "2b-path-20261109152656-9f0b8f",
+        "slot": 3
+      }
+    ],
+    "estimated_total_credits": "817.233025000",
+    "pilot_id": "2b-path-story-pilot-v4-zai-20261109150154-7a81b0",
+    "schedule_sha256": "6fad5f55435dabc6e839ac541751cc7e9353f3ee7d98727d78a14e228ceef9b8",
+    "valid_slots_carried_forward": []
+  },
+  "prior_v2_closeout_context": {
+    "accrued_usd": "46.339601000",
+    "authorization_transfer": "not_performed",
+    "pilot_id": "2b-path-story-pilot-v2-20261109090930-389179",
+    "remaining_authorization_usd": "53.660399000",
+    "schedule_sha256": "c6949a7cc22ee08df88b22add45284b7e1e30c1c7dbe2976fe0588c887bf4ba1",
+    "slot3_reconciliation_sha256": "4f8bbb06635b62fd2f517429869ee1bf75de36a270e41910f87bbeb6d0ae55cf",
+    "slot4_reconciliation_sha256": "2cb8f75d5d1bd85e1563367082b98a0c69c40e630a4358510cd08ba1bebcf636"
+  },
+  "provider": "zai",
+  "reinforcement_every": 3,
+  "replacement_policy": {
+    "infrastructure_invalid_reasons": [
+      "provider_rate_limit",
+      "model_usage_missing",
+      "controller_error",
+      "agent_failure",
+      "replay_failure",
+      "source_or_image_drift",
+      "missing_required_telemetry",
+      "undeclared_terminal_state"
+    ],
+    "maximum_infrastructure_invalid_replacements_per_slot": 2,
+    "pause_on_provider_rate_limit": true,
+    "replace_behavioral_outcomes": false,
+    "retry_same_frozen_slot_arm_and_seed": true
+  },
+  "runtime_policy": {
+    "executor_max_turns": 500,
+    "executor_turn_policy": "full_declared_ceiling",
+    "max_attempts_per_task": 500,
+    "max_decisions": 500,
+    "max_supervisor_attempts": 500,
+    "name": "horizon-support-v3",
+    "schema_version": 3,
+    "supervisor_max_turns": 500
+  },
+  "schema_version": 1,
+  "status": "schedule_freeze_available_after_v5_preflight",
+  "target": "ssh://lab@filesystem-decoy-2b",
+  "task_path": "config/agent_2b_task.json",
+  "task_sha256": "72f1d9978b51e3508905100653ecab5e44d6db5d4f3adbea30dbfe7ab1052689",
+  "trial_caps": {
+    "max_agent_tool_calls": 500,
+    "max_filesystem_actions": 500,
+    "max_model_calls": 500,
+    "max_model_tokens_input_plus_output": 100000000,
+    "maximum_total_wall_seconds": 780,
+    "post_entry_wall_seconds": 600,
+    "pre_entry_wall_seconds": 180,
+    "retention_horizons_seconds": [
+      60,
+      180,
+      300,
+      600
+    ]
+  },
+  "zai_model_free_preflight": {
+    "report_path": "runs/path-story-zai-v5-preflight-20261110/report.json",
+    "report_sha256": "9d65b88a17d570d8c79dd301e40e27ab0caa76b88d2ac21746f6b5fb37f4fd45"
+  }
+}

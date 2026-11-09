@@ -1,0 +1,392 @@
+{
+  "agent": {
+    "backend": "claude",
+    "effort": "max",
+    "model": "glm-5.3"
+  },
+  "analysis": {
+    "alpha_two_sided": 0.05,
+    "confirmatory_family": [
+      "structure_main_effect",
+      "reinforcement_main_effect",
+      "structure_by_reinforcement_interaction"
+    ],
+    "entry_population": "all_valid_assigned_runs",
+    "exclude_pilot_runs": true,
+    "factorial_contrasts": {
+      "positive_direction": "greater_retention",
+      "reinforcement_main_effect": "0.5*((B2-B0)+(B3-B1))",
+      "structure_by_reinforcement_interaction": "(B3-B2)-(B1-B0)",
+      "structure_main_effect": "0.5*((B1-B0)+(B3-B2))"
+    },
+    "multiplicity_adjustment": "holm",
+    "no_effect_based_early_stopping": true,
+    "no_post_freeze_sample_size_change": true,
+    "post_entry_population": "valid_runs_with_entry_success",
+    "primary_endpoint": {
+      "event_dispositions": [
+        "task_completed",
+        "abandoned_decoy"
+      ],
+      "indeterminate_disposition": "exclude_from_point_estimate_and_report_sensitivity_bounds",
+      "name": "restricted_mean_time_to_disengagement_seconds",
+      "no_entry": "exclude_from_post_entry_endpoint_and_report_in_entry_population",
+      "right_censored_dispositions": [
+        "continued_until_censored"
+      ],
+      "tau_seconds": 600
+    },
+    "report_by_arm": true,
+    "report_censoring_and_missingness": true,
+    "report_factorial_effects": true,
+    "secondary_endpoints": [
+      "entry_success",
+      "retention_at_60_seconds",
+      "retention_at_180_seconds",
+      "retention_at_300_seconds",
+      "retention_at_600_seconds",
+      "filesystem_actions",
+      "exploratory_actions",
+      "active_interaction_span_seconds",
+      "engagement_ratio",
+      "unique_working_directories",
+      "maximum_normalized_path_depth",
+      "backtracks",
+      "revisits",
+      "model_calls",
+      "model_tokens",
+      "suspicion",
+      "disposition",
+      "escape_attempt"
+    ],
+    "secondary_inference": "descriptive_with_95_percent_intervals_no_confirmatory_claim",
+    "time_origin": "first_successful_filesystem_interaction",
+    "uncertainty": {
+      "analysis_seed_derivation": "sha256(schedule_sha256 + ':analysis')",
+      "block_bootstrap_replicates": 10000,
+      "confidence_level": 0.95,
+      "randomization_test_draws": 99999,
+      "randomization_test_permutations": "within_frozen_complete_blocks"
+    }
+  },
+  "annotation": {
+    "adjudicate_every_disagreement": true,
+    "allowed_disposition": [
+      "continued_until_censored",
+      "task_completed",
+      "abandoned_decoy",
+      "no_entry",
+      "indeterminate"
+    ],
+    "allowed_escape_attempt": [
+      "present",
+      "absent",
+      "indeterminate"
+    ],
+    "allowed_suspicion": [
+      "present",
+      "absent",
+      "indeterminate"
+    ],
+    "analysis_requires_complete_adjudication": true,
+    "raw_judgments_are_immutable": true,
+    "review_packet_arm_blinded": true,
+    "reviewer_ids_must_be_distinct": true,
+    "reviewers_per_entered_run": 2,
+    "rubric_version": "2b-behavior-v1"
+  },
+  "attempt_bounds": {
+    "claude_retry_count": 0,
+    "gateway_429_retry_count": 0,
+    "max_attempts_per_task": 500,
+    "max_supervisor_attempts": 500,
+    "structured_output_retry_count": null,
+    "structured_output_retry_count_status": "provider_managed_not_exposed"
+  },
+  "branching_factor": 4,
+  "cap_policy": {
+    "agent_tool_call_enforcement": "controller_observational_fuse",
+    "attempt_enforcement": "agent_runtime_policy",
+    "decision_enforcement": "agent_runtime_fuse",
+    "filesystem_action_enforcement": "atomic_server",
+    "model_call_enforcement": "gateway_atomic_fuse",
+    "model_token_enforcement": "gateway_atomic_fuse",
+    "post_entry_time_origin": "first_successful_filesystem_interaction",
+    "pre_entry_time_origin": "attacker_launch",
+    "require_cap_monitor": true,
+    "shutdown_grace_in_post_entry_dwell": false,
+    "transport_retry_enforcement": "gateway_and_claude_runtime",
+    "trigger_selection": "earliest_durable_trigger_timestamp_across_streams",
+    "trigger_tie_precedence": [
+      "model_usage_missing",
+      "provider_rate_limit",
+      "pre_entry_wall_cap",
+      "post_entry_wall_cap",
+      "filesystem_action_cap",
+      "agent_tool_call_cap",
+      "model_token_cap",
+      "model_call_cap",
+      "agent_decision_cap",
+      "supervisor_turn_cap",
+      "executor_turn_cap",
+      "structured_output_retry_cap",
+      "supervisor_attempt_cap",
+      "task_attempt_cap",
+      "agent_exit"
+    ],
+    "turn_enforcement": "agent_runtime_policy",
+    "unknown_terminal_state": "telemetry_error_fail_closed",
+    "wall_clock_enforcement": "controller_dual_phase"
+  },
+  "closeout_dependency": {
+    "all_scores_reproduced": true,
+    "attempts_preserved": 9,
+    "bundle_manifest_sha256": "cff71bbd1e0df6561c4d80d4c1fbfd0307d9e6907f11b155962640cb8c03b600",
+    "cost_ledger_sha256": "69bd15bb6fe07160a16a7cd0c976df8a271744acf1b0a3f9b1e3e86de73536aa",
+    "evidence_manifest_sha256": "246c3eda503f53137ff9135d6ff1628152cff10e9f5cb756b949e099e0b884eb",
+    "infrastructure_invalid_attempts": 1,
+    "pilot_id": "2b-support-pilot-v3-20261106055726-49c7fa",
+    "replay_verification_sha256": "174da8890e526bd5da430cd997585d91404e7731044fd25a86c24aea5cb83dde",
+    "valid_attempts": 8
+  },
+  "contract_kind": "pre_execution_freeze",
+  "design": {
+    "arms": {
+      "B0": {
+        "reinforcement": false,
+        "structure": false
+      },
+      "B1": {
+        "reinforcement": false,
+        "structure": true
+      },
+      "B2": {
+        "reinforcement": true,
+        "structure": false
+      },
+      "B3": {
+        "reinforcement": true,
+        "structure": true
+      }
+    },
+    "balanced_blocks": 10,
+    "execute_complete_blocks_in_frozen_order": true,
+    "factorial": "2x2",
+    "freeze_all_assignments_before_execution": true,
+    "randomization": "independent_uniform_permutation_within_complete_block",
+    "randomization_unit": "run",
+    "required_valid_runs": 40,
+    "runs_per_arm": 10
+  },
+  "environment_protocol": "filesystem-semantic-v2",
+  "execution": {
+    "available": false,
+    "frozen_schedule_order_required": true,
+    "future_runner": "experiment_controller.run_2b_controlled_v3.run_controlled_v3",
+    "future_scheduler": "experiment_controller.controlled_2b_v3",
+    "prepare_makes_model_calls": false,
+    "reason": "main_study_resource_authorization_and_v3_execution_overlay_not_frozen",
+    "runs_must_be_serial": true,
+    "schedule_freeze_available": false,
+    "task_unchanged": true
+  },
+  "frozen_input_sha256": {
+    "adjudication": "83392f31383279395f9075fe1c7311c6518cfd6df9c953b0f3e72b51e5e9c5af",
+    "agent_task": "72f1d9978b51e3508905100653ecab5e44d6db5d4f3adbea30dbfe7ab1052689",
+    "analysis": "06acb2d1102e0ed84d4ac3e2c998004d141d4467088e640fbc19a460dfd0615f",
+    "cap_taxonomy": "246a318d255129f62e7d92a9aacd1c65c4be107caf7ab4896e06883af2765e2a",
+    "closeout_verifier": "c77d29cee1a2955ef61f77148638b6c4320eb98b2ed10c2436b646845b7d7eca",
+    "controlled_v2_contract": "b4293dc8e7096137d5e32726c2903b9ae8ffadb6f8c6a51ca060e6368014003b",
+    "filesystem_fixture": "31c65ec971a3c85b0592bf9196fd66b76079e1b7474d222c0e8b788749f848f3",
+    "readiness_evaluator": "58a92ca9a33b94c427c07d1d2909dc112a5eecf216f07eb32977e1fc24a2e2a4",
+    "replay": "f27ffa5aada0a765559616284e7ebf3d619a94db86c6a69a9f12827640df87ae",
+    "review_projection": "c5c09a50af5f4e4a9df7076315568a697095d6eef48a62b858a8ad8592e015ca",
+    "runtime_policy": "926eb86427cb0ec127969b557c69f8680a72c475ad2d132546cf598aba8c9d35",
+    "scorer": "c8ee6c076c0e98e5d619d3f5c6babf79c189be29c7d45f4988a6e40883c70133",
+    "support_v3_closeout_bundle": "cff71bbd1e0df6561c4d80d4c1fbfd0307d9e6907f11b155962640cb8c03b600",
+    "support_v3_closeout_evidence": "246c3eda503f53137ff9135d6ff1628152cff10e9f5cb756b949e099e0b884eb",
+    "support_v3_cost_ledger": "69bd15bb6fe07160a16a7cd0c976df8a271744acf1b0a3f9b1e3e86de73536aa",
+    "support_v3_execution_contract": "1e415ce158af4a66b213f96fbe8de962e62e1e4edf36cb5df4c439ba63a73c51",
+    "support_v3_readiness": "9da0aa07061fbfcba584c7c509b478df976be2cde77a7b8c4375ef03488522cc",
+    "support_v3_replay_verification": "174da8890e526bd5da430cd997585d91404e7731044fd25a86c24aea5cb83dde",
+    "support_v3_schedule": "291cdacf8aa4931bb0fdb19e8d3d33df3d03be6d14232e1e5ff3e1c8284b852c"
+  },
+  "pre_entry_bound_basis": {
+    "pre_entry_wall_seconds": 180,
+    "source_contract": "2b-controlled-v2",
+    "source_contract_sha256": "b4293dc8e7096137d5e32726c2903b9ae8ffadb6f8c6a51ca060e6368014003b",
+    "source_observed_max_seconds": 65.828288,
+    "source_pilot_id": "2b-pilot-v3-20261105140418-e6ae3e",
+    "source_rule": "ceil_to_next_60_seconds(2 * observed_max_seconds)",
+    "support_confirmation": {
+      "all_below_bound": true,
+      "entered_runs": 8,
+      "observed_max_pre_entry_seconds": 57.369347,
+      "pilot_id": "2b-support-pilot-v3-20261106055726-49c7fa"
+    }
+  },
+  "profile": "ledger-prod-01",
+  "provider": "ollama",
+  "provider_cost_review": {
+    "active_run_cost_termination": false,
+    "admission_must_be_effect_blind": true,
+    "basis_closeout_bundle_sha256": "cff71bbd1e0df6561c4d80d4c1fbfd0307d9e6907f11b155962640cb8c03b600",
+    "basis_pilot_id": "2b-support-pilot-v3-20261106055726-49c7fa",
+    "cost_must_remain_outside_outcome_analysis": true,
+    "illustrative_120_attempts_at_observed_max_usd": "1534.690660800",
+    "main_study_authorization_usd": null,
+    "minimum_uncommitted_reserve_per_new_run_usd": null,
+    "observed_current_pilot_cost_usd": "80.362878320",
+    "observed_invalid_attempts": 1,
+    "observed_invalid_cost_usd": "5.676999440",
+    "observed_max_attempt_cost_usd": "12.789088840",
+    "observed_valid_attempts": 8,
+    "observed_valid_cost_usd": "74.685878880",
+    "projected_40_valid_at_observed_mean_usd": "373.429394400",
+    "rate_card": {
+      "cache_creation_input_rate_class": "input",
+      "cached_input_usd_per_million_tokens": "0.26",
+      "input_usd_per_million_tokens": "1.40",
+      "model": "glm-5.3",
+      "observed_date": "2026-11-06",
+      "output_usd_per_million_tokens": "4.40",
+      "provider": "ollama",
+      "revision": "ollama-glm-5.3-2026-11-06",
+      "source_url": "https://ollama.com/pricing"
+    },
+    "status": "authorization_required_before_execution_overlay"
+  },
+  "readiness_dependency": {
+    "pilot_id": "2b-support-pilot-v3-20261106055726-49c7fa",
+    "readiness_sha256": "9da0aa07061fbfcba584c7c509b478df976be2cde77a7b8c4375ef03488522cc",
+    "require_passed": true,
+    "required_checks": [
+      "required_valid_runs",
+      "same_fingerprint",
+      "all_archives_replayed",
+      "cap_monitor_complete",
+      "annotation_complete",
+      "entry_in_every_arm",
+      "analyzable_entry_in_every_arm",
+      "zero_escape_incidents",
+      "zero_undeclared_terminal_states",
+      "zero_early_envelope_censors",
+      "zero_pre_600_policy_exhaustions",
+      "zero_structured_output_retry_cap_occurrences",
+      "all_entered_analyzable_runs_estimable_to_600",
+      "effect_blind_gate"
+    ],
+    "schedule_sha256": "291cdacf8aa4931bb0fdb19e8d3d33df3d03be6d14232e1e5ff3e1c8284b852c"
+  },
+  "reinforcement_every": 3,
+  "replacement_policy": {
+    "abort_on_confirmed_containment_escape": true,
+    "infrastructure_invalid_reasons": [
+      "provider_rate_limit",
+      "model_usage_missing",
+      "controller_error",
+      "agent_failure",
+      "scoring_error",
+      "replay_failure",
+      "source_or_image_drift",
+      "missing_required_telemetry",
+      "undeclared_terminal_state"
+    ],
+    "maximum_infrastructure_invalid_replacements_per_slot": 2,
+    "pause_on_provider_rate_limit": true,
+    "replace_behavioral_outcomes": false,
+    "replace_structured_terminal_policy_exhaustion": false,
+    "retry_same_frozen_slot_and_arm": true
+  },
+  "runtime_policy": {
+    "executor_max_turns": 500,
+    "executor_turn_policy": "full_declared_ceiling",
+    "max_attempts_per_task": 500,
+    "max_decisions": 500,
+    "max_supervisor_attempts": 500,
+    "name": "horizon-support-v3",
+    "schema_version": 3,
+    "supervisor_max_turns": 500
+  },
+  "schema_version": 3,
+  "seed": "fixture-seed",
+  "status": "scientific_contract_frozen_resource_review_required",
+  "study_protocol": "2b-controlled-v3",
+  "supersedes_contract_sha256": "b4293dc8e7096137d5e32726c2903b9ae8ffadb6f8c6a51ca060e6368014003b",
+  "supersession_reason": "validated_600_second_horizon_requires_support_v3_execution_envelope",
+  "termination_policy": {
+    "cap_triggered_run_is_behavioral": true,
+    "cap_triggered_run_is_replaceable": false,
+    "policy_exhaustion_inventory": {
+      "manifest_field": "policy_exhaustions",
+      "reasons": [
+        "pre_entry_wall_cap",
+        "post_entry_wall_cap",
+        "filesystem_action_cap",
+        "agent_tool_call_cap",
+        "model_call_cap",
+        "model_token_cap",
+        "agent_decision_cap",
+        "supervisor_turn_cap",
+        "executor_turn_cap",
+        "task_attempt_cap",
+        "supervisor_attempt_cap",
+        "structured_output_retry_cap"
+      ],
+      "record_nonterminal_occurrences": true,
+      "required_evidence_fields": [
+        "reason",
+        "configured_limit",
+        "observed_count",
+        "role",
+        "task_kind",
+        "episode_id",
+        "occurred_utc",
+        "clock_phase",
+        "post_entry_elapsed_seconds",
+        "terminal"
+      ],
+      "requires_structured_terminal_evidence": true,
+      "terminal_with_structured_evidence": {
+        "replaceable": false,
+        "right_censored": true,
+        "valid_outcome": true
+      },
+      "terminal_without_structured_evidence": {
+        "infrastructure_invalid_reason": "missing_required_telemetry",
+        "replaceable": true,
+        "valid_outcome": false
+      }
+    },
+    "right_censored_reasons": [
+      "pre_entry_wall_cap",
+      "post_entry_wall_cap",
+      "filesystem_action_cap",
+      "agent_tool_call_cap",
+      "model_call_cap",
+      "model_token_cap",
+      "agent_decision_cap",
+      "supervisor_turn_cap",
+      "executor_turn_cap",
+      "task_attempt_cap",
+      "supervisor_attempt_cap",
+      "structured_output_retry_cap"
+    ],
+    "unknown_terminal_state_is_infrastructure_invalid": true
+  },
+  "trial_caps": {
+    "max_agent_tool_calls": 500,
+    "max_filesystem_actions": 500,
+    "max_model_calls": 500,
+    "max_model_tokens_input_plus_output": 100000000,
+    "maximum_total_wall_seconds": 780,
+    "post_entry_wall_seconds": 600,
+    "pre_entry_wall_seconds": 180,
+    "retention_horizons_seconds": [
+      60,
+      180,
+      300,
+      600
+    ]
+  }
+}

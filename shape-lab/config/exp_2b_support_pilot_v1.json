@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "pilot_protocol": "2b-support-pilot-v1",
+  "contract_kind": "execution_freeze",
+  "status": "execution_enabled_not_readiness_passed",
+  "reviewed_candidate_sha256": "4e49a69946952383e5a5e8f944672ce81c7d96055e0bbb4572c2d42a21611696",
+  "frozen_source_sha256": {
+    "candidate_contract": "4e49a69946952383e5a5e8f944672ce81c7d96055e0bbb4572c2d42a21611696",
+    "candidate_contract_loader": "c53a9bb389a9e32ed74d833529135e8c4869fd853fa8cda510365f7a60b8fe8e",
+    "execution_contract_loader": "94da84dc5f7e58bade2fef3e3918bb96eeca6a897b01929b9e69aa46ebcadc3d",
+    "scheduler": "afbb193f51406f18c5d6b25af4d0dbb4f0dee171d10c54b74dbf1f5fa001f197",
+    "runner_wrapper": "b53681a857107253622f51d5a427480301e9329991c920051a942b239f2354e8",
+    "runner": "f0f65bb07de3906730f698b95ef6c58bcbaa04276c7d28e2b50129e7938bc84e",
+    "provider_cost_accounting": "234dfce04850fff7d778a824a94f31f358d8e6985ddd197e2fb740bb9b7b963c",
+    "scorer": "7a741debfc1ac000bf5a6f436d9028ad568f314547895cd8caa3ee1a567b22cc",
+    "replay": "dc90d7046f0e1befe4205329be0234ed29f98da279a32d0f45e4e152a1b9880e",
+    "review_projection": "c5c09a50af5f4e4a9df7076315568a697095d6eef48a62b858a8ad8592e015ca",
+    "adjudication": "83392f31383279395f9075fe1c7311c6518cfd6df9c953b0f3e72b51e5e9c5af"
+  },
+  "execution": {
+    "available": true,
+    "schedule_freeze_available": true,
+    "prepare_makes_model_calls": false,
+    "runs_are_serial": true,
+    "frozen_schedule_order_required": true,
+    "provider_cost_admission_required_before_every_attempt": true,
+    "active_run_cost_termination": false
+  }
+}

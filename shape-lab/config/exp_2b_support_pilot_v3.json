@@ -1,0 +1,123 @@
+{
+  "schema_version": 3,
+  "pilot_protocol": "2b-support-pilot-v3",
+  "contract_kind": "execution_freeze",
+  "status": "execution_enabled_not_readiness_passed",
+  "base_candidate_sha256": "4e49a69946952383e5a5e8f944672ce81c7d96055e0bbb4572c2d42a21611696",
+  "supersedes_execution_contract_sha256": "07097d23f859fbf40efb959a0f1900b30e14fdeec15adc4b37a182ad4618ff58",
+  "supersession_reason": "v2_external_stop_inventory_bug_and_pre_600_attempt_exhaustion",
+  "predecessor_evidence_sha256": {
+    "superseded_execution_contract": "07097d23f859fbf40efb959a0f1900b30e14fdeec15adc4b37a182ad4618ff58",
+    "superseded_execution_commitment": "9128add58485c03114e9ac96c3c717ae742e143e84117de6c5f2d31e8de458d2",
+    "superseded_schedule": "c970b56fe1b58ab51513c084e22d12e79691ff6752fa8c8e3eea7da50556187f",
+    "superseded_schedule_commitment": "df7e7802efd57ef765e48355d065b26e109a19cd2ce95a285e908b7cd031016a",
+    "first_run_manifest": "5bf0f4b7779eeb95f722041163fc0eb2134bce165d34b1af42c1565e1fd47490",
+    "first_run_result": "da63e9e1a062e0edaf7ce86af35b3014f270b7028698c1a57232728071a8ae48",
+    "first_run_gateway": "4215e4a71956f681363a0b97001cdca6bd078e3349065bcb063ac584dbfdeed9",
+    "second_run_manifest": "806617f8c34e5b70bc3d721dd09ec3be79be4befeee245473f37dd79949bab05",
+    "second_run_result": "0873270aafb052c812d80bc184f6923c27de4647756a27e3fc05802a64057af1",
+    "second_run_gateway": "c60f42cd3aea83f336e5e771f64d66f9d1a4008e5b6a1b52a42b936972ae55f7",
+    "first_run_integrity_incident": "39a3a317dfb19268f824dcd1754aeed99320e9c3abd05306c186d76ea9220da7"
+  },
+  "runtime_policy": {
+    "schema_version": 3,
+    "name": "horizon-support-v3",
+    "max_decisions": 500,
+    "max_supervisor_attempts": 500,
+    "max_attempts_per_task": 500,
+    "supervisor_max_turns": 500,
+    "executor_max_turns": 500,
+    "executor_turn_policy": "full_declared_ceiling"
+  },
+  "attempt_bounds": {
+    "claude_retry_count": 0,
+    "gateway_429_retry_count": 0,
+    "max_attempts_per_task": 500,
+    "max_supervisor_attempts": 500,
+    "structured_output_retry_count": null,
+    "structured_output_retry_count_status": "provider_managed_not_exposed"
+  },
+  "trial_caps": {
+    "max_filesystem_actions": 500,
+    "max_agent_tool_calls": 500,
+    "max_model_calls": 500,
+    "max_model_tokens_input_plus_output": 100000000,
+    "pre_entry_wall_seconds": 180,
+    "post_entry_wall_seconds": 600,
+    "maximum_total_wall_seconds": 780,
+    "retention_horizons_seconds": [
+      60,
+      180,
+      300,
+      600
+    ]
+  },
+  "resource_review": {
+    "approved": true,
+    "basis": "v2_two_attempt_observed_cost_and_600_second_completion",
+    "v2_observed_attempts": 2,
+    "v2_observed_cost_usd": "10.684347160",
+    "v2_both_reached_post_entry_seconds": 600,
+    "pilot_authorization_usd": "100.00",
+    "opening_remaining_authorization_usd": "89.315652840",
+    "minimum_uncommitted_reserve_per_new_run_usd": "15.00",
+    "active_run_cost_termination": false
+  },
+  "provider_cost_carry_forward": {
+    "schema_version": 1,
+    "accounting_rule": "committed_baseline_plus_current_pilot_archives",
+    "source_pilot_id": "2b-support-pilot-v2-20261106050510-2cf465",
+    "source_schedule_sha256": "c970b56fe1b58ab51513c084e22d12e79691ff6752fa8c8e3eea7da50556187f",
+    "rate_card_revision": "ollama-glm-5.3-2026-11-06",
+    "ordered_run_ids": [
+      "2b-supp-20261106050724-85cba5",
+      "2b-supp-20261106051918-0fe4df"
+    ],
+    "completed_attempts_priced": 2,
+    "accrued_cost_nano_usd": 10684347160,
+    "accrued_cost_usd": "10.684347160",
+    "evidence": [
+      {
+        "run_id": "2b-supp-20261106050724-85cba5",
+        "manifest_sha256": "5bf0f4b7779eeb95f722041163fc0eb2134bce165d34b1af42c1565e1fd47490",
+        "gateway_events_sha256": "4215e4a71956f681363a0b97001cdca6bd078e3349065bcb063ac584dbfdeed9",
+        "estimated_cost_nano_usd": 4535334520,
+        "estimated_cost_usd": "4.535334520"
+      },
+      {
+        "run_id": "2b-supp-20261106051918-0fe4df",
+        "manifest_sha256": "806617f8c34e5b70bc3d721dd09ec3be79be4befeee245473f37dd79949bab05",
+        "gateway_events_sha256": "c60f42cd3aea83f336e5e771f64d66f9d1a4008e5b6a1b52a42b936972ae55f7",
+        "estimated_cost_nano_usd": 6149012640,
+        "estimated_cost_usd": "6.149012640"
+      }
+    ]
+  },
+  "frozen_source_sha256": {
+    "base_candidate_contract": "4e49a69946952383e5a5e8f944672ce81c7d96055e0bbb4572c2d42a21611696",
+    "base_candidate_loader": "8016de5f92ea9d478ccd07693e6e3ac1b1834d8314bd1b623944c5ff7e8c4c43",
+    "execution_contract_loader": "05245e05253fde1e4450b47a1d8f152eb0498f67e4fffc97fa1e12fd2bc135f1",
+    "scheduler": "a369b9e08afe1c48e38180bcbabacdd9f40116784a50700a45f96da3ade7254a",
+    "runner_wrapper": "2ee9ec66652f3c5187222667aedf3180a49ec5c682e2ec6d7664af143f5a50d7",
+    "runner": "4e9ed5a42379e5aca4381b71245b9e2eb2f282d404803e44d6c9197a524e35f0",
+    "runtime_policy": "926eb86427cb0ec127969b557c69f8680a72c475ad2d132546cf598aba8c9d35",
+    "agent_entrypoint": "8ad6f58766017d618f0ce84b9f8aceeab2f3fee0594117fd6d143a434f2bebc2",
+    "provider_cost_accounting": "234dfce04850fff7d778a824a94f31f358d8e6985ddd197e2fb740bb9b7b963c",
+    "cap_taxonomy": "246a318d255129f62e7d92a9aacd1c65c4be107caf7ab4896e06883af2765e2a",
+    "scorer": "c8ee6c076c0e98e5d619d3f5c6babf79c189be29c7d45f4988a6e40883c70133",
+    "replay": "f27ffa5aada0a765559616284e7ebf3d619a94db86c6a69a9f12827640df87ae",
+    "review_projection": "c5c09a50af5f4e4a9df7076315568a697095d6eef48a62b858a8ad8592e015ca",
+    "adjudication": "83392f31383279395f9075fe1c7311c6518cfd6df9c953b0f3e72b51e5e9c5af"
+  },
+  "execution": {
+    "available": true,
+    "schedule_freeze_available": true,
+    "prepare_makes_model_calls": false,
+    "runs_are_serial": true,
+    "frozen_schedule_order_required": true,
+    "provider_cost_admission_required_before_every_attempt": true,
+    "active_run_cost_termination": false,
+    "superseded_v1_attempt_is_excluded": true,
+    "superseded_v2_attempts_are_excluded": true
+  }
+}

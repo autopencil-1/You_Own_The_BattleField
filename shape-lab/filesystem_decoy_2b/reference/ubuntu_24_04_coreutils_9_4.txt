@@ -1,0 +1,108 @@
+SHAPE 2B Ubuntu metadata behavior reference
+image=ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+locale=C timezone=UTC
+stat (GNU coreutils) 9.4
+ls (GNU coreutils) 9.4
+find (GNU findutils) 4.9.0
+
+[ls-long-numeric]
+total 4
+drwxr-x--- 3 1000 1000 80 2025-01-17 03:42 .
+drwxr-xr-x 3    0    0 60 2025-01-17 03:42 ..
+drwxr-x--- 2 1000 1000 60 2025-01-17 03:42 bin
+-rw-r----- 1 1000 1000 14 2025-01-17 03:42 notes.txt
+total 0
+drwxr-xr-x 4    0    0 160 2025-01-17 03:42 .
+drwxr-xr-x 4    0    0  80 2025-01-17 03:42 ..
+lrwxrwxrwx 1    0    0   7 2025-01-17 03:42 cycle-a -> cycle-b
+lrwxrwxrwx 1    0    0   7 2025-01-17 03:42 cycle-b -> cycle-a
+lrwxrwxrwx 1    0    0  20 2025-01-17 03:42 dangling -> recovery/missing.txt
+lrwxrwxrwx 1    0    0  20 2025-01-17 03:42 latest -> recovery/archive.txt
+drwxr-x--- 2   34   34  60 2025-01-17 03:42 recovery
+drwxr-s--- 2 1500 1600  60 2025-01-17 03:42 staging
+
+[ls-long-names]
+-rw-r----- 1 ubuntu ubuntu 14 2025-01-17 03:42 /reference/home/ubuntu/notes.txt
+drwxr-s--- 2   1500   1600 60 2025-01-17 03:42 /reference/var/backups/staging
+-rw-r----- 1   1500   1600 12 2025-01-17 03:42 /reference/var/backups/staging/private.txt
+-rw-r----- 1 root   adm    16 2025-01-17 03:42 /reference/var/log/service.log
+
+[stat-stable-fields]
+path|type|octal|symbolic|uid|user|gid|group|size|links|atime|mtime|quoted-name
+/reference/home/ubuntu|directory|750|drwxr-x---|1000|ubuntu|1000|ubuntu|80|3|2025-02-03 07:08:09.987654321 +0000|2025-01-17 03:42:11.123456789 +0000|'/reference/home/ubuntu'
+/reference/home/ubuntu/notes.txt|regular file|640|-rw-r-----|1000|ubuntu|1000|ubuntu|14|1|2025-02-03 07:08:09.987654321 +0000|2025-01-17 03:42:11.123456789 +0000|'/reference/home/ubuntu/notes.txt'
+/reference/var/log/service.log|regular file|640|-rw-r-----|0|root|4|adm|16|1|2025-02-03 07:08:09.987654321 +0000|2025-01-17 03:42:11.123456789 +0000|'/reference/var/log/service.log'
+/reference/var/backups/staging|directory|2750|drwxr-s---|1500|UNKNOWN|1600|UNKNOWN|60|2|2025-02-03 07:08:09.987654321 +0000|2025-01-17 03:42:11.123456789 +0000|'/reference/var/backups/staging'
+/reference/var/backups/staging/private.txt|regular file|640|-rw-r-----|1500|UNKNOWN|1600|UNKNOWN|12|1|2025-02-03 07:08:09.987654321 +0000|2025-01-17 03:42:11.123456789 +0000|'/reference/var/backups/staging/private.txt'
+/reference/var/backups/latest|symbolic link|777|lrwxrwxrwx|0|root|0|root|20|1|2025-02-03 07:08:09.987654321 +0000|2025-01-17 03:42:11.123456789 +0000|'/reference/var/backups/latest' -> 'recovery/archive.txt'
+/reference/var/backups/dangling|symbolic link|777|lrwxrwxrwx|0|root|0|root|20|1|2025-02-03 07:08:09.987654321 +0000|2025-01-17 03:42:11.123456789 +0000|'/reference/var/backups/dangling' -> 'recovery/missing.txt'
+
+[stat-default-layout-normalized]
+  File: /reference/var/backups/latest -> recovery/archive.txt
+  Size: 20        	Blocks: 0          IO Block: 4096   symbolic link
+Device: <runtime-device>	Inode: <runtime-inode>          Links: 1
+Access: (0777/lrwxrwxrwx)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2025-02-03 07:08:09.987654321 +0000
+Modify: 2025-01-17 03:42:11.123456789 +0000
+Change: <runtime-dependent>
+ Birth: <runtime-dependent>
+
+[hard-link-relationship]
+/reference/etc/app.conf|inode=<same-inode>|links=2|size=15
+/reference/etc/app.conf.hard|inode=<same-inode>|links=2|size=15
+
+[find-permission-forms]
+exact-0640:
+home/ubuntu/notes.txt|640|ubuntu|ubuntu
+var/backups/staging/private.txt|640|1500|1600
+var/log/service.log|640|root|adm
+all-u+r-and-g+r:
+etc|755|root|root
+home/ubuntu/bin/report|755|ubuntu|ubuntu
+home/ubuntu/bin|750|ubuntu|ubuntu
+home/ubuntu/notes.txt|640|ubuntu|ubuntu
+home/ubuntu|750|ubuntu|ubuntu
+home|755|root|root
+list-only/entry.txt|644|root|root
+list-only|744|root|root
+shared/note.txt|644|root|root
+shared|1777|root|root
+traverse-only/known.txt|644|root|root
+var/backups/cycle-a|777|root|root
+var/backups/cycle-b|777|root|root
+var/backups/dangling|777|root|root
+var/backups/latest|777|root|root
+var/backups/recovery/archive.txt|440|backup|backup
+var/backups/recovery|750|backup|backup
+var/backups/staging/private.txt|640|1500|1600
+var/backups/staging|2750|1500|1600
+var/backups|755|root|root
+var/log/service.log|640|root|adm
+var/log|750|root|adm
+var|755|root|root
+|755|root|root
+any-world-write:
+shared|1777|root|root
+var/backups/cycle-a|777|root|root
+var/backups/cycle-b|777|root|root
+var/backups/dangling|777|root|root
+var/backups/latest|777|root|root
+uid-1500:
+var/backups/staging/private.txt|640|1500|1600
+var/backups/staging|2750|1500|1600
+
+[symlink-following]
+lstat|'/reference/var/backups/latest' -> 'recovery/archive.txt'|type=symbolic link|mode=777|size=20
+follow|'/reference/var/backups/latest'|type=regular file|mode=440|size=18
+cycle-status=1
+stat: cannot statx '<virtual-root>/var/backups/cycle-a': Too many levels of symbolic links
+
+[unprivileged-access-as-ubuntu]
+read|/reference/home/ubuntu/notes.txt|allowed
+write|/reference/home/ubuntu/notes.txt|allowed
+read|/reference/var/log/service.log|denied
+read|/reference/var/backups/recovery/archive.txt|denied
+traverse|/reference/list-only|denied
+list|/reference/list-only|allowed
+traverse|/reference/traverse-only|allowed
+list|/reference/traverse-only|denied

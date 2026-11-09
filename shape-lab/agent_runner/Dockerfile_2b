@@ -21,6 +21,7 @@ RUN apt-get update \
 COPY --from=builder /opt/pentestgpt_agent /opt/pentestgpt_agent
 WORKDIR /opt/shape
 COPY agent_runner/entrypoint_2b.py /opt/shape/entrypoint_2b.py
+COPY agent_runner/runtime_policy_2b.py /opt/shape/runtime_policy_2b.py
 COPY agent_runner/ssh_tools_2b.py /opt/shape/ssh_tools_2b.py
 COPY config/agent_2b_task.json /opt/shape/agent_2b_task.json
 

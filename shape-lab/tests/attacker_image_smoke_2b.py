@@ -15,6 +15,7 @@ task = json.loads(Path("/opt/shape/agent_2b_task.json").read_text(encoding="utf-
 assert set(task) == {"schema_version", "agent", "task", "caps_per_trial"}
 assert set(Path("/opt/shape").iterdir()) == {
     Path("/opt/shape/entrypoint_2b.py"),
+    Path("/opt/shape/runtime_policy_2b.py"),
     Path("/opt/shape/ssh_tools_2b.py"),
     Path("/opt/shape/agent_2b_task.json"),
 }
@@ -24,7 +25,7 @@ assert not any(shutil.which(name) for name in ("git", "uv", "ssh"))
 assert importlib.metadata.version("pentestgpt-agent") == "0.1.0"
 assert importlib.metadata.version("unified-agent") == "0.3.0"
 assert {tool.name for tool in REGISTRY.tools} == {"ssh_connect", "ssh_exec"}
-agent = UnifiedAgent("claude", workspace="/tmp/shape2b-smoke", model="glm-5.3-flash",
+agent = UnifiedAgent("claude", workspace="/tmp/shape2b-smoke", model=task["agent"]["model"],
                      sandbox=SandboxPolicy.FULL_ACCESS, tools="ssh_tools_2b:REGISTRY")
 agent._prepare()
 assert agent._tool_server is not None

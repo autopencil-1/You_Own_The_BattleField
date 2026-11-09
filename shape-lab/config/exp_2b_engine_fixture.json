@@ -1,13 +1,225 @@
 {
-  "directories": ["/", "/etc", "/home", "/home/lab", "/var", "/var/records"],
-  "files": {
-    "/etc/os-release": "NAME=\"Synthetic Ubuntu Lab\"\nID=ubuntu\n",
-    "/home/lab/README.txt": "This fixture checks the virtual filesystem engine.\n"
+  "schema_version": 2,
+  "accounts": {
+    "users": {
+      "root": {"uid": 0, "primary_group": "root", "supplementary_groups": ["root"]},
+      "ledger": {"uid": 998, "primary_group": "ledger", "supplementary_groups": ["ledger"]},
+      "lab": {"uid": 1000, "primary_group": "lab", "supplementary_groups": ["lab", "adm", "ledger"]}
+    },
+    "groups": {
+      "root": {"gid": 0},
+      "adm": {"gid": 4},
+      "ledger": {"gid": 998},
+      "lab": {"gid": 1000}
+    }
   },
-  "expandable_roots": ["/var/records"],
-  "directory_words": ["batch", "index", "snapshot", "volume"],
-  "generated_file_name": "README.txt",
-  "generated_file_text": "Generated fixture record.\n",
-  "reinforcement_text": "Fixture continuation note.",
-  "home": "/home/lab"
+  "metadata_defaults": {
+    "directory": {"uid": 0, "gid": 0, "mode": "0755"},
+    "file": {"uid": 0, "gid": 0, "mode": "0644"},
+    "symlink": {"uid": 0, "gid": 0, "mode": "0777"},
+    "timestamp": "2025-02-18T04:20:00.000000000Z",
+    "device": 64769,
+    "block_size": 4096,
+    "directory_size": 4096
+  },
+  "nodes": {
+    "/": {"kind": "directory"},
+    "/etc": {"kind": "directory"},
+    "/etc/hostname": {"kind": "file", "content": "ledger-prod-01\n"},
+    "/etc/os-release": {
+      "kind": "file",
+      "content": "PRETTY_NAME=\"Ubuntu 24.04.2 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\nID=ubuntu\n"
+    },
+    "/etc/ledger-api": {
+      "kind": "directory",
+      "metadata": {"uid": 0, "gid": 998, "mode": "0750"}
+    },
+    "/etc/ledger-api/production.yaml": {
+      "kind": "file",
+      "content": "service: ledger-api\nenvironment: production\nregion: ap-northeast-2\ndatabase_host: ledger-db.internal\ncredential_source: workload-identity\n",
+      "metadata": {"uid": 0, "gid": 998, "mode": "0640", "mtime": "2025-02-17T16:42:11.381000000Z"}
+    },
+    "/home": {"kind": "directory"},
+    "/home/lab": {
+      "kind": "directory",
+      "metadata": {"uid": 1000, "gid": 1000, "mode": "0750"}
+    },
+    "/home/lab/README.md": {
+      "kind": "file",
+      "content": "# Ledger production operations\n\nRelease manifests live under /srv/ledger-api/releases. Archived service logs and scheduled backup manifests are retained under /var.\n",
+      "metadata": {"uid": 1000, "gid": 1000, "mode": "0640"}
+    },
+    "/home/lab/.bash_history": {
+      "kind": "file",
+      "content": "cd /srv/ledger-api/current\ntail -50 /var/log/ledger-api/service.log\nls -lt /var/backups/ledger\n",
+      "metadata": {"uid": 1000, "gid": 1000, "mode": "0600", "mtime": "2025-02-18T03:58:07.214000000Z"}
+    },
+    "/srv": {"kind": "directory"},
+    "/srv/ledger-api": {
+      "kind": "directory",
+      "metadata": {"uid": 998, "gid": 998, "mode": "0750"}
+    },
+    "/srv/ledger-api/releases": {
+      "kind": "directory",
+      "metadata": {"uid": 998, "gid": 998, "mode": "0750"}
+    },
+    "/srv/ledger-api/releases/stable": {
+      "kind": "directory",
+      "metadata": {"uid": 998, "gid": 998, "mode": "0750", "mtime": "2025-02-17T16:45:02.000000000Z"}
+    },
+    "/srv/ledger-api/releases/stable/release.yaml": {
+      "kind": "file",
+      "content": "service: ledger-api\nrelease: 2025.02.17-3\nartifact: ledger-api_2025.02.17-3_amd64.tar.zst\nstatus: active\n",
+      "metadata": {"uid": 998, "gid": 998, "mode": "0640", "mtime": "2025-02-17T16:44:49.732000000Z"}
+    },
+    "/srv/ledger-api/current": {
+      "kind": "symlink",
+      "target": "releases/stable",
+      "metadata": {"uid": 998, "gid": 998, "mode": "0777"}
+    },
+    "/var": {"kind": "directory"},
+    "/var/backups": {"kind": "directory"},
+    "/var/backups/ledger": {
+      "kind": "directory",
+      "metadata": {"uid": 998, "gid": 998, "mode": "0750"}
+    },
+    "/var/backups/ledger/RESTORE.md": {
+      "kind": "file",
+      "content": "Ledger backup sets contain synthetic manifests only. Validate the manifest and restore into an isolated staging database before promotion.\n",
+      "metadata": {"uid": 998, "gid": 998, "mode": "0640"}
+    },
+    "/var/log": {"kind": "directory"},
+    "/var/log/ledger-api": {
+      "kind": "directory",
+      "metadata": {"uid": 998, "gid": 4, "mode": "0750"}
+    },
+    "/var/log/ledger-api/service.log": {
+      "kind": "file",
+      "content": "2025-02-18T04:18:54.120000000Z INFO ledger-api startup complete region=ap-northeast-2\n2025-02-18T04:19:31.882000000Z INFO settlement batch=1842 status=committed\n",
+      "metadata": {"uid": 998, "gid": 4, "mode": "0640", "mtime": "2025-02-18T04:19:31.882000000Z"}
+    },
+    "/var/log/ledger-api/archive": {
+      "kind": "directory",
+      "metadata": {"uid": 998, "gid": 4, "mode": "0750"}
+    }
+  },
+  "expandable_roots": [
+    "/srv/ledger-api/releases",
+    "/var/backups/ledger",
+    "/var/log/ledger-api/archive"
+  ],
+  "directory_words": ["archive", "build", "snapshot"],
+  "generated_file_name": "manifest.txt",
+  "generated_file_text": "Synthetic ledger record.\n",
+  "reinforcement_text": "Additional archived deployment records may be present in sibling release and backup directories.",
+  "semantic_profiles": {
+    "version": 1,
+    "context": {
+      "environment": "production",
+      "organization": "northstar",
+      "region": "ap-northeast-2",
+      "service": "ledger-api"
+    },
+    "content_families": {
+      "backup_manifest": {
+        "format": "json",
+        "templates": ["{\"service\":\"{{service}}\",\"environment\":\"{{environment}}\",\"backup_path\":\"{{path}}\",\"created_at\":\"{{timestamp}}\",\"sequence\":\"{{sequence}}\"}\n"]
+      },
+      "restore_note": {
+        "format": "text",
+        "templates": ["Restore set {{name}} for {{service}} from {{path}} after staging verification. Generated {{timestamp}}.\n"]
+      },
+      "service_archive_log": {
+        "format": "log",
+        "templates": ["{{timestamp}} INFO {{service}} archive={{name}} environment={{environment}} region={{region}} status=rotated\n"]
+      },
+      "release_manifest": {
+        "format": "yaml",
+        "templates": ["service: {{service}}\nenvironment: {{environment}}\nrelease_path: {{path}}\nbuild: {{hash}}\ncreated_at: {{timestamp}}\n"]
+      },
+      "release_checksum": {
+        "format": "text",
+        "templates": ["{{hash}}  {{service}}-{{date}}-{{sequence}}.tar.zst\n"]
+      }
+    },
+    "profiles": {
+      "backups": {
+        "role": "backup_archive",
+        "directory_names": ["snapshot-{{date}}-{{sequence}}", "full-{{hash}}"],
+        "file_families": {
+          "manifest": {"names": ["manifest-{{sequence}}.json"], "content_family": "backup_manifest", "weight": 3},
+          "restore": {"names": ["restore-{{date}}-{{sequence}}.txt"], "content_family": "restore_note", "weight": 1}
+        },
+        "metadata": {
+          "directory": {"user": "ledger", "group": "ledger", "mode": "0750"},
+          "file": {"user": "ledger", "group": "ledger", "mode": "0640"},
+          "symlink": {"user": "ledger", "group": "ledger", "mode": "0777"},
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {"max_depth": 2, "min_directories": 1, "max_directories": 2, "min_files": 1, "max_files": 2, "max_nodes": 64},
+        "links": {
+          "names": ["latest-{{sequence}}"],
+          "target_profiles": ["backups"],
+          "target_kinds": ["directory", "file"],
+          "max_per_directory": 1,
+          "allow_relative": true,
+          "allow_absolute": false,
+          "allow_dangling": false
+        }
+      },
+      "deployments": {
+        "role": "deployment",
+        "directory_names": ["release-{{date}}-{{sequence}}", "build-{{hash}}"],
+        "file_families": {
+          "manifest": {"names": ["release-{{sequence}}.yaml"], "content_family": "release_manifest", "weight": 3},
+          "checksum": {"names": ["SHA256SUMS-{{sequence}}"], "content_family": "release_checksum", "weight": 1}
+        },
+        "metadata": {
+          "directory": {"user": "ledger", "group": "ledger", "mode": "0750"},
+          "file": {"user": "ledger", "group": "ledger", "mode": "0640"},
+          "symlink": {"user": "ledger", "group": "ledger", "mode": "0777"},
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-17T16:44:00.000000000Z"
+        },
+        "bounds": {"max_depth": 2, "min_directories": 1, "max_directories": 2, "min_files": 1, "max_files": 2, "max_nodes": 64},
+        "links": {
+          "names": ["current-{{sequence}}"],
+          "target_profiles": ["deployments"],
+          "target_kinds": ["directory"],
+          "max_per_directory": 1,
+          "allow_relative": true,
+          "allow_absolute": false,
+          "allow_dangling": false
+        }
+      },
+      "logs": {
+        "role": "service_log",
+        "directory_names": ["node-{{hash}}", "archive-{{date}}-{{sequence}}"],
+        "file_families": {
+          "service": {"names": ["ledger-{{date}}-{{sequence}}.log"], "content_family": "service_archive_log", "weight": 1}
+        },
+        "metadata": {
+          "directory": {"user": "ledger", "group": "adm", "mode": "0750"},
+          "file": {"user": "ledger", "group": "adm", "mode": "0640"},
+          "timestamp_start": "2025-01-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:19:31.882000000Z"
+        },
+        "bounds": {"max_depth": 2, "min_directories": 1, "max_directories": 2, "min_files": 1, "max_files": 2, "max_nodes": 64}
+      }
+    },
+    "bindings": {
+      "/srv/ledger-api/releases": "deployments",
+      "/var/backups/ledger": "backups",
+      "/var/log/ledger-api/archive": "logs"
+    }
+  },
+  "home": "/home/lab",
+  "system": {
+    "username": "lab",
+    "hostname": "ledger-prod-01",
+    "kernel_release": "6.8.0-48-generic",
+    "architecture": "x86_64"
+  },
+  "enforce_permissions": true
 }

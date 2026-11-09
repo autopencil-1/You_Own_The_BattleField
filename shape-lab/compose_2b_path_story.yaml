@@ -1,0 +1,12 @@
+services:
+  filesystem-decoy-2b:
+    image: shape-filesystem-decoy-2b:path-story-v1
+    build:
+      dockerfile: filesystem_decoy_2b/Dockerfile_path_story
+    environment:
+      SHAPE_2B_PROFILE_PATH: /app/config/exp_2b_path_story_v1.json
+
+  attacker-agent:
+    image: shape-2b-attacker:path-story-v1
+    build:
+      dockerfile: agent_runner/Dockerfile_2b_path_story

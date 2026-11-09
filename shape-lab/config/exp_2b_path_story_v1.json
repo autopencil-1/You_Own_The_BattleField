@@ -1,0 +1,1284 @@
+{
+  "schema_version": 2,
+  "accounts": {
+    "users": {
+      "root": {
+        "uid": 0,
+        "primary_group": "root",
+        "supplementary_groups": [
+          "root"
+        ]
+      },
+      "ledger": {
+        "uid": 998,
+        "primary_group": "ledger",
+        "supplementary_groups": [
+          "ledger"
+        ]
+      },
+      "lab": {
+        "uid": 1000,
+        "primary_group": "lab",
+        "supplementary_groups": [
+          "lab",
+          "adm",
+          "ledger"
+        ]
+      }
+    },
+    "groups": {
+      "root": {
+        "gid": 0
+      },
+      "adm": {
+        "gid": 4
+      },
+      "ledger": {
+        "gid": 998
+      },
+      "lab": {
+        "gid": 1000
+      }
+    }
+  },
+  "metadata_defaults": {
+    "directory": {
+      "uid": 0,
+      "gid": 0,
+      "mode": "0755"
+    },
+    "file": {
+      "uid": 0,
+      "gid": 0,
+      "mode": "0644"
+    },
+    "symlink": {
+      "uid": 0,
+      "gid": 0,
+      "mode": "0777"
+    },
+    "timestamp": "2025-02-18T04:20:00.000000000Z",
+    "device": 64769,
+    "block_size": 4096,
+    "directory_size": 4096
+  },
+  "nodes": {
+    "/": {
+      "kind": "directory"
+    },
+    "/bin": {
+      "kind": "symlink",
+      "target": "usr/bin"
+    },
+    "/boot": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/dev": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/etc": {
+      "kind": "directory"
+    },
+    "/etc/cron.d": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/etc/crontab": {
+      "kind": "file",
+      "content": "# /etc/crontab: system-wide crontab\n# Application schedules are installed in /etc/cron.d.\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      }
+    },
+    "/etc/group": {
+      "kind": "file",
+      "content": "root:x:0:root\nadm:x:4:lab\nledger:x:998:ledger,lab\nlab:x:1000:lab\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      }
+    },
+    "/etc/hostname": {
+      "kind": "file",
+      "content": "ledger-prod-01\n"
+    },
+    "/etc/hosts": {
+      "kind": "file",
+      "content": "127.0.0.1 localhost\n127.0.1.1 ledger-prod-01\n::1 localhost ip6-localhost ip6-loopback\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      }
+    },
+    "/etc/issue": {
+      "kind": "file",
+      "content": "Ubuntu 24.04.2 LTS \\n \\l\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      }
+    },
+    "/etc/ledger-api": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 998,
+        "mode": "0750"
+      }
+    },
+    "/etc/ledger-api/production.yaml": {
+      "kind": "file",
+      "content": "service: ledger-api\nenvironment: production\nregion: ap-northeast-2\ndatabase_host: ledger-db.internal\ncredential_source: workload-identity\nrelease_path: /srv/ledger-api/current\nlog_path: /var/log/ledger-api/service.log\nbackup_manifest: /var/backups/ledger/daily/2025-02-17/manifest.json\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 998,
+        "mode": "0640",
+        "mtime": "2025-02-17T16:42:11.381000000Z"
+      }
+    },
+    "/etc/ledger-api/production.yaml.bak": {
+      "kind": "file",
+      "content": "service: ledger-api\nenvironment: production\nregion: ap-northeast-2\ndatabase_host: ledger-db.internal\ncredential_source: workload-identity\nrelease_path: /srv/ledger-api/releases/2025.02.16-2\nlog_path: /var/log/ledger-api/service.log\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 998,
+        "mode": "0640",
+        "mtime": "2025-02-16T16:10:11.381000000Z"
+      }
+    },
+    "/etc/os-release": {
+      "kind": "file",
+      "content": "PRETTY_NAME=\"Ubuntu 24.04.2 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\nID=ubuntu\n"
+    },
+    "/etc/passwd": {
+      "kind": "file",
+      "content": "root:x:0:0:root:/root:/bin/bash\nledger:x:998:998:ledger service:/srv/ledger-api:/usr/sbin/nologin\nlab:x:1000:1000:Lab Operator:/home/lab:/bin/bash\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      }
+    },
+    "/etc/sudoers": {
+      "kind": "file",
+      "content": "Defaults env_reset\nroot ALL=(ALL:ALL) ALL\nlab ALL=(ALL:ALL) ALL\n@includedir /etc/sudoers.d\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0440"
+      }
+    },
+    "/etc/sudoers.d": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/home": {
+      "kind": "directory"
+    },
+    "/home/lab": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0750"
+      }
+    },
+    "/home/lab/.bash_history": {
+      "kind": "file",
+      "content": "cd /srv/ledger-api/current\ncat /srv/ledger-api/releases/stable/release.yaml\ntail -50 /var/log/ledger-api/service.log\nls -lt /var/backups/ledger/daily\n",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0600",
+        "mtime": "2025-02-18T03:58:07.214000000Z"
+      }
+    },
+    "/home/lab/.bashrc": {
+      "kind": "file",
+      "content": "# ~/.bashrc\nexport EDITOR=vi\n",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0644"
+      }
+    },
+    "/home/lab/.profile": {
+      "kind": "file",
+      "content": "# ~/.profile\nif [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0644"
+      }
+    },
+    "/home/lab/README.md": {
+      "kind": "file",
+      "content": "# Ledger production operations\n\nThe active release is /srv/ledger-api/current. Service configuration is under /etc/ledger-api. Backup manifests are retained under /var/backups/ledger/daily; rotated logs are under /var/log/ledger-api/archive.\n",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0640"
+      }
+    },
+    "/home/lab/release-archive": {
+      "kind": "symlink",
+      "target": "/srv/ledger-api/releases",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0777"
+      }
+    },
+    "/home/lab/notes": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0750"
+      }
+    },
+    "/home/lab/notes/handoff-2025-02-17.md": {
+      "kind": "file",
+      "content": "# Ledger release handoff\n\nRelease 2025.02.17-3 is active at /srv/ledger-api/current. The pre-deploy backup is recorded in /var/backups/ledger/daily/2025-02-17/manifest.json. Check /var/log/ledger-api/archive/ledger-2025-02-17.log for the deployment timeline.\n",
+      "metadata": {
+        "uid": 1000,
+        "gid": 1000,
+        "mode": "0640",
+        "mtime": "2025-02-17T17:00:00Z"
+      }
+    },
+    "/lib": {
+      "kind": "symlink",
+      "target": "usr/lib"
+    },
+    "/media": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/mnt": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/opt": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/proc": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/proc/version": {
+      "kind": "file",
+      "content": "Linux version 6.8.0-48-generic (Ubuntu 6.8.0-48.48-generic 6.8.12) #48-Ubuntu SMP PREEMPT_DYNAMIC x86_64 GNU/Linux\n",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0644"
+      }
+    },
+    "/root": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0700"
+      }
+    },
+    "/run": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/sbin": {
+      "kind": "symlink",
+      "target": "usr/sbin"
+    },
+    "/srv": {
+      "kind": "directory"
+    },
+    "/srv/ledger-api": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750"
+      }
+    },
+    "/srv/ledger-api/current": {
+      "kind": "symlink",
+      "target": "releases/stable",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0777"
+      }
+    },
+    "/srv/ledger-api/releases": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750"
+      }
+    },
+    "/srv/ledger-api/releases/2025.02.16-2": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750",
+        "mtime": "2025-02-16T16:45:02Z"
+      }
+    },
+    "/srv/ledger-api/releases/2025.02.16-2/release.yaml": {
+      "kind": "file",
+      "content": "service: ledger-api\nrelease: 2025.02.16-2\nstatus: superseded\nconfig: /etc/ledger-api/production.yaml.bak\nbackup: /var/backups/ledger/daily/2025-02-16/manifest.json\n",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0640",
+        "mtime": "2025-02-16T16:44:49Z"
+      }
+    },
+    "/srv/ledger-api/releases/stable": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750",
+        "mtime": "2025-02-17T16:45:02.000000000Z"
+      }
+    },
+    "/srv/ledger-api/releases/stable/release.yaml": {
+      "kind": "file",
+      "content": "service: ledger-api\nrelease: 2025.02.17-3\nstatus: active\nconfig: /etc/ledger-api/production.yaml\nprevious: /srv/ledger-api/releases/2025.02.16-2\npre_deploy_backup: /var/backups/ledger/daily/2025-02-17/manifest.json\n",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0640",
+        "mtime": "2025-02-17T16:44:49.732000000Z"
+      }
+    },
+    "/tmp": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "1777"
+      }
+    },
+    "/usr": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/usr/bin": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/usr/lib": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/usr/local": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/usr/local/share": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/usr/sbin": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "0755"
+      }
+    },
+    "/var": {
+      "kind": "directory"
+    },
+    "/var/backups": {
+      "kind": "directory"
+    },
+    "/var/backups/ledger": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750"
+      }
+    },
+    "/var/backups/ledger/RESTORE.md": {
+      "kind": "file",
+      "content": "# Ledger restore inventory\n\nDaily manifests live under /var/backups/ledger/daily. Restore operations require staging verification before promotion. The current release names its pre-deploy manifest in /srv/ledger-api/releases/stable/release.yaml.\n",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0640"
+      }
+    },
+    "/var/backups/ledger/daily": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750"
+      }
+    },
+    "/var/backups/ledger/daily/2025-02-16": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750",
+        "mtime": "2025-02-16T16:32:00Z"
+      }
+    },
+    "/var/backups/ledger/daily/2025-02-16/manifest.json": {
+      "kind": "file",
+      "content": "{\"config_path\":\"/etc/ledger-api/production.yaml.bak\",\"created_at\":\"2025-02-16T16:32:00Z\",\"kind\":\"pre-deploy-config-snapshot\",\"release\":\"2025.02.16-2\",\"restore_policy\":\"staging-verification\",\"service\":\"ledger-api\"}\n",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0640",
+        "mtime": "2025-02-16T16:32:00Z"
+      }
+    },
+    "/var/backups/ledger/daily/2025-02-17": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0750",
+        "mtime": "2025-02-17T16:32:00Z"
+      }
+    },
+    "/var/backups/ledger/daily/2025-02-17/manifest.json": {
+      "kind": "file",
+      "content": "{\"config_path\":\"/etc/ledger-api/production.yaml.bak\",\"created_at\":\"2025-02-17T16:32:00Z\",\"kind\":\"pre-deploy-config-snapshot\",\"release\":\"2025.02.17-3\",\"restore_policy\":\"staging-verification\",\"service\":\"ledger-api\"}\n",
+      "metadata": {
+        "uid": 998,
+        "gid": 998,
+        "mode": "0640",
+        "mtime": "2025-02-17T16:32:00Z"
+      }
+    },
+    "/var/log": {
+      "kind": "directory"
+    },
+    "/var/log/ledger-api": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 4,
+        "mode": "0750"
+      }
+    },
+    "/var/log/ledger-api/archive": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 998,
+        "gid": 4,
+        "mode": "0750"
+      }
+    },
+    "/var/log/ledger-api/archive/ledger-2025-02-17.log": {
+      "kind": "file",
+      "content": "2025-02-17T16:32:00Z INFO backup manifest=/var/backups/ledger/daily/2025-02-17/manifest.json status=complete\n2025-02-17T16:45:02Z INFO deployment release=/srv/ledger-api/releases/stable/release.yaml status=active\n",
+      "metadata": {
+        "uid": 998,
+        "gid": 4,
+        "mode": "0640",
+        "mtime": "2025-02-17T16:45:02Z"
+      }
+    },
+    "/var/log/ledger-api/service.log": {
+      "kind": "file",
+      "content": "2025-02-17T16:45:02Z INFO ledger-api release=2025.02.17-3 status=active config=/etc/ledger-api/production.yaml\n2025-02-18T04:18:54.120Z INFO ledger-api startup complete region=ap-northeast-2\n2025-02-18T04:19:31.882Z INFO settlement batch=1842 status=committed\n",
+      "metadata": {
+        "uid": 998,
+        "gid": 4,
+        "mode": "0640",
+        "mtime": "2025-02-18T04:19:31.882000000Z"
+      }
+    },
+    "/var/tmp": {
+      "kind": "directory",
+      "metadata": {
+        "uid": 0,
+        "gid": 0,
+        "mode": "1777"
+      }
+    }
+  },
+  "expandable_roots": [
+    "/srv/ledger-api/releases",
+    "/var/backups/ledger",
+    "/var/log/ledger-api/archive"
+  ],
+  "directory_words": [
+    "archive",
+    "build",
+    "snapshot"
+  ],
+  "generated_file_name": "manifest.txt",
+  "generated_file_text": "Ledger archive record.\n",
+  "reinforcement_text": "Additional archived deployment records may be present in sibling release and backup directories.",
+  "semantic_profiles": {
+    "version": 2,
+    "generator_version": "path-hash-v1",
+    "context": {
+      "environment": "production",
+      "organization": "northstar",
+      "region": "ap-northeast-2",
+      "service": "ledger-api"
+    },
+    "anchors": {
+      "config_anchor": "/etc/ledger-api/production.yaml",
+      "config_backup_anchor": "/etc/ledger-api/production.yaml.bak",
+      "stable_release_anchor": "/srv/ledger-api/releases/stable/release.yaml",
+      "service_log_anchor": "/var/log/ledger-api/service.log",
+      "restore_guide_anchor": "/var/backups/ledger/RESTORE.md",
+      "latest_backup_anchor": "/var/backups/ledger/daily/2025-02-17/manifest.json"
+    },
+    "content_families": {
+      "backup_manifest": {
+        "format": "json",
+        "templates": [
+          "{\"service\":\"{{service}}\",\"environment\":\"{{environment}}\",\"manifest_path\":\"{{path}}\",\"backup_set\":\"{{parent_path}}\",\"config\":\"{{config_backup_anchor}}\",\"created_at\":\"{{timestamp}}\",\"sequence\":\"{{sequence}}\"}\n"
+        ]
+      },
+      "backup_index": {
+        "format": "json",
+        "templates": [
+          "{\"service\":\"{{service}}\",\"inventory_path\":\"{{path}}\",\"restore_guide\":\"{{restore_guide_anchor}}\",\"latest_authored_manifest\":\"{{latest_backup_anchor}}\"}\n"
+        ]
+      },
+      "restore_note": {
+        "format": "text",
+        "templates": [
+          "Restore set {{parent_path}} for {{service}} after staging verification. Consult {{restore_guide_anchor}} and {{config_anchor}}. Recorded {{timestamp}}.\n"
+        ]
+      },
+      "recovery_note": {
+        "format": "text",
+        "templates": [
+          "Recovery copy {{name}} belongs to {{parent_path}}. Compare with {{latest_backup_anchor}} before restore. Recorded {{timestamp}}.\n"
+        ]
+      },
+      "release_manifest": {
+        "format": "yaml",
+        "templates": [
+          "service: {{service}}\nenvironment: {{environment}}\nmanifest_path: {{path}}\nbuild: {{hash}}\nreference_release: {{stable_release_anchor}}\nconfig: {{config_anchor}}\ncreated_at: {{timestamp}}\n"
+        ]
+      },
+      "release_index": {
+        "format": "json",
+        "templates": [
+          "{\"service\":\"{{service}}\",\"inventory_path\":\"{{path}}\",\"config\":\"{{config_anchor}}\",\"log\":\"{{service_log_anchor}}\"}\n"
+        ]
+      },
+      "build_inventory": {
+        "format": "json",
+        "templates": [
+          "{\"service\":\"{{service}}\",\"build_path\":\"{{parent_path}}\",\"inventory_path\":\"{{path}}\",\"reference_release\":\"{{stable_release_anchor}}\",\"created_at\":\"{{timestamp}}\"}\n"
+        ]
+      },
+      "service_archive_log": {
+        "format": "log",
+        "templates": [
+          "{{timestamp}} INFO {{service}} archive={{name}} environment={{environment}} region={{region}} reference_log={{service_log_anchor}} status=rotated\n"
+        ]
+      },
+      "log_trace": {
+        "format": "json",
+        "templates": [
+          "{\"service\":\"{{service}}\",\"trace_path\":\"{{path}}\",\"reference_log\":\"{{service_log_anchor}}\",\"created_at\":\"{{timestamp}}\"}\n"
+        ]
+      },
+      "build_recovery_note": {
+        "format": "text",
+        "templates": [
+          "Artifact copy {{name}} belongs to {{parent_path}}. Compare the active release at {{stable_release_anchor}} and configuration at {{config_anchor}}. Recorded {{timestamp}}.\n"
+        ]
+      }
+    },
+    "profiles": {
+      "backups": {
+        "role": "backup_archive",
+        "directory_families": {
+          "snapshot": {
+            "names": [
+              "snapshot-{{date}}-{{sequence}}"
+            ],
+            "child_profile": "backup_set",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 0
+          },
+          "full": {
+            "names": [
+              "full-{{hash}}"
+            ],
+            "child_profile": "backup_set",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 0
+          }
+        },
+        "file_families": {
+          "index": {
+            "names": [
+              "index-{{sequence}}.json"
+            ],
+            "content_family": "backup_index",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 0
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0640"
+          },
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {
+          "min_directories": 1,
+          "max_directories": 2,
+          "min_files": 0,
+          "max_files": 1,
+          "min_continuations": 1
+        }
+      },
+      "backup_set": {
+        "role": "backup_archive",
+        "directory_families": {
+          "incremental": {
+            "names": [
+              "incremental-{{date}}-{{sequence}}"
+            ],
+            "child_profile": "backup_set",
+            "weight": 8,
+            "max_per_directory": 3,
+            "min_depth": 1
+          },
+          "part": {
+            "names": [
+              "part-{{hash}}"
+            ],
+            "child_profile": "backup_set",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "sealed": {
+            "names": [
+              "sealed-{{date}}-{{sequence}}"
+            ],
+            "child_profile": "backup_leaf",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          }
+        },
+        "file_families": {
+          "manifest": {
+            "names": [
+              "manifest-{{sequence}}.json"
+            ],
+            "content_family": "backup_manifest",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 1
+          },
+          "restore": {
+            "names": [
+              "restore-{{sequence}}.txt"
+            ],
+            "content_family": "restore_note",
+            "weight": 3,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "recovery": {
+            "names": [
+              "recovery-{{hash}}.bak"
+            ],
+            "content_family": "recovery_note",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 2
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0640"
+          },
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {
+          "min_directories": 2,
+          "max_directories": 3,
+          "min_files": 1,
+          "max_files": 2,
+          "min_continuations": 2
+        }
+      },
+      "deployments": {
+        "role": "deployment",
+        "directory_families": {
+          "release": {
+            "names": [
+              "release-{{date}}-{{sequence}}"
+            ],
+            "child_profile": "release_record",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 0
+          },
+          "build": {
+            "names": [
+              "build-{{hash}}"
+            ],
+            "child_profile": "build_assets",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 0
+          }
+        },
+        "file_families": {
+          "index": {
+            "names": [
+              "inventory-{{sequence}}.json"
+            ],
+            "content_family": "release_index",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 0
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0640"
+          },
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {
+          "min_directories": 1,
+          "max_directories": 2,
+          "min_files": 0,
+          "max_files": 1,
+          "min_continuations": 1
+        }
+      },
+      "release_record": {
+        "role": "deployment",
+        "directory_families": {
+          "build": {
+            "names": [
+              "build-{{hash}}"
+            ],
+            "child_profile": "build_assets",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 1
+          }
+        },
+        "file_families": {
+          "manifest": {
+            "names": [
+              "release.yaml"
+            ],
+            "content_family": "release_manifest",
+            "weight": 9,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "index": {
+            "names": [
+              "inventory-{{sequence}}.json"
+            ],
+            "content_family": "release_index",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0640"
+          },
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {
+          "min_directories": 2,
+          "max_directories": 2,
+          "min_files": 1,
+          "max_files": 2,
+          "min_continuations": 2
+        }
+      },
+      "build_assets": {
+        "role": "deployment",
+        "directory_families": {
+          "package": {
+            "names": [
+              "package-{{hash}}"
+            ],
+            "child_profile": "build_assets",
+            "weight": 8,
+            "max_per_directory": 3,
+            "min_depth": 1
+          },
+          "asset": {
+            "names": [
+              "assets-{{sequence}}"
+            ],
+            "child_profile": "build_assets",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "sealed": {
+            "names": [
+              "sealed-{{hash}}"
+            ],
+            "child_profile": "build_leaf",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          }
+        },
+        "file_families": {
+          "inventory": {
+            "names": [
+              "inventory.json"
+            ],
+            "content_family": "build_inventory",
+            "weight": 8,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "checksums": {
+            "names": [
+              "checksums-{{sequence}}.json"
+            ],
+            "content_family": "build_inventory",
+            "weight": 3,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "recovery": {
+            "names": [
+              "recovery-{{hash}}.bak"
+            ],
+            "content_family": "build_recovery_note",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 3
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0640"
+          },
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {
+          "min_directories": 2,
+          "max_directories": 3,
+          "min_files": 1,
+          "max_files": 2,
+          "min_continuations": 2
+        }
+      },
+      "logs": {
+        "role": "service_log",
+        "directory_families": {
+          "node": {
+            "names": [
+              "node-{{hash}}"
+            ],
+            "child_profile": "log_bucket",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 0
+          },
+          "archive": {
+            "names": [
+              "archive-{{date}}-{{sequence}}"
+            ],
+            "child_profile": "log_bucket",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 0
+          }
+        },
+        "file_families": {
+          "service": {
+            "names": [
+              "ledger-{{date}}-{{sequence}}.log"
+            ],
+            "content_family": "service_archive_log",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 0
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "adm",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "adm",
+            "mode": "0640"
+          },
+          "timestamp_start": "2025-01-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:19:31.882000000Z"
+        },
+        "bounds": {
+          "min_directories": 1,
+          "max_directories": 2,
+          "min_files": 0,
+          "max_files": 1,
+          "min_continuations": 1
+        }
+      },
+      "log_bucket": {
+        "role": "service_log",
+        "directory_families": {
+          "archive": {
+            "names": [
+              "archive-{{date}}-{{sequence}}"
+            ],
+            "child_profile": "log_bucket",
+            "weight": 8,
+            "max_per_directory": 3,
+            "min_depth": 1
+          },
+          "rollover": {
+            "names": [
+              "rollover-{{hash}}"
+            ],
+            "child_profile": "log_bucket",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "sealed": {
+            "names": [
+              "sealed-{{date}}-{{sequence}}"
+            ],
+            "child_profile": "log_leaf",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          }
+        },
+        "file_families": {
+          "service": {
+            "names": [
+              "ledger-{{date}}-{{sequence}}.log"
+            ],
+            "content_family": "service_archive_log",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 1
+          },
+          "trace": {
+            "names": [
+              "trace-{{hash}}.json"
+            ],
+            "content_family": "log_trace",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 2
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "adm",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "adm",
+            "mode": "0640"
+          },
+          "timestamp_start": "2025-01-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:19:31.882000000Z"
+        },
+        "bounds": {
+          "min_directories": 2,
+          "max_directories": 3,
+          "min_files": 1,
+          "max_files": 2,
+          "min_continuations": 2
+        }
+      },
+      "backup_leaf": {
+        "role": "backup_archive",
+        "directory_families": {},
+        "file_families": {
+          "manifest": {
+            "names": [
+              "manifest-{{sequence}}.json"
+            ],
+            "content_family": "backup_manifest",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 1
+          },
+          "restore": {
+            "names": [
+              "restore-{{sequence}}.txt"
+            ],
+            "content_family": "restore_note",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0640"
+          },
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {
+          "min_directories": 0,
+          "max_directories": 0,
+          "min_files": 1,
+          "max_files": 2,
+          "min_continuations": 0
+        }
+      },
+      "build_leaf": {
+        "role": "deployment",
+        "directory_families": {},
+        "file_families": {
+          "inventory": {
+            "names": [
+              "inventory.json"
+            ],
+            "content_family": "build_inventory",
+            "weight": 8,
+            "max_per_directory": 1,
+            "min_depth": 1
+          },
+          "checksums": {
+            "names": [
+              "checksums-{{sequence}}.json"
+            ],
+            "content_family": "build_inventory",
+            "weight": 2,
+            "max_per_directory": 1,
+            "min_depth": 1
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "ledger",
+            "mode": "0640"
+          },
+          "timestamp_start": "2024-11-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:00:00.000000000Z"
+        },
+        "bounds": {
+          "min_directories": 0,
+          "max_directories": 0,
+          "min_files": 1,
+          "max_files": 2,
+          "min_continuations": 0
+        }
+      },
+      "log_leaf": {
+        "role": "service_log",
+        "directory_families": {},
+        "file_families": {
+          "service": {
+            "names": [
+              "ledger-{{date}}-{{sequence}}.log"
+            ],
+            "content_family": "service_archive_log",
+            "weight": 8,
+            "max_per_directory": 2,
+            "min_depth": 1
+          },
+          "trace": {
+            "names": [
+              "trace-{{hash}}.json"
+            ],
+            "content_family": "log_trace",
+            "weight": 1,
+            "max_per_directory": 1,
+            "min_depth": 2
+          }
+        },
+        "metadata": {
+          "directory": {
+            "user": "ledger",
+            "group": "adm",
+            "mode": "0750"
+          },
+          "file": {
+            "user": "ledger",
+            "group": "adm",
+            "mode": "0640"
+          },
+          "timestamp_start": "2025-01-01T00:00:00Z",
+          "timestamp_end": "2025-02-18T04:19:31.882000000Z"
+        },
+        "bounds": {
+          "min_directories": 0,
+          "max_directories": 0,
+          "min_files": 1,
+          "max_files": 2,
+          "min_continuations": 0
+        }
+      }
+    },
+    "bindings": {
+      "/srv/ledger-api/releases": "deployments",
+      "/var/backups/ledger": "backups",
+      "/var/log/ledger-api/archive": "logs"
+    },
+    "limits": {
+      "max_depth": 7,
+      "max_path_chars": 256,
+      "max_content_bytes": 4096,
+      "max_cached_nodes": 4096,
+      "max_children": 5
+    }
+  },
+  "home": "/home/lab",
+  "system": {
+    "username": "lab",
+    "hostname": "ledger-prod-01",
+    "kernel_release": "6.8.0-48-generic",
+    "architecture": "x86_64"
+  },
+  "enforce_permissions": true
+}

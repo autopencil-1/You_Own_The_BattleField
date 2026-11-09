@@ -124,7 +124,7 @@ sources is uncertain.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ SHAPE 2B  Run 2b-...   LIVE  • model glm-5.3-flash   [Replay]              │
+│ SHAPE 2B  Run 2b-...   LIVE  • model glm-5.3   [Replay]                    │
 │                                                  Agent 03:14 / 10:00       │
 │                                                  Decoy dwell 02:42         │
 ├───────────────────────────────────┬─────────────────────────────────────────┤
@@ -205,8 +205,9 @@ Claude transcripts. Browser rendering uses text nodes and bounded previews.
    that the timer starts at `agent_started`, not controller preparation.
 6. **Agent validation and later study:** the B0 fixture connectivity check is
    available after explicit operator launch; use it to verify PentestGPT event
-   timing and pairing. After story freeze, pilot the full story. Monitoring
-   code and UI settings should be pinned before the randomized 40-run study.
+   timing and pairing. The schema-v2 story and CLI-only, eight-run pilot gate
+   are frozen; pilot execution remains pending. Monitoring code and UI settings
+   should be pinned before any later randomized 40-run study.
 
 The initial deliverable is a live observer and honest replay of existing
 artifacts. No UI action changes the agent, virtual filesystem, treatment, or

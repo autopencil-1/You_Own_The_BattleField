@@ -19,17 +19,30 @@ from .virtual_fs import FilesystemSpec, Session, VirtualFilesystem
 
 
 MAX_REQUEST_BYTES = 2048
-ARMS = {"B0": (False, False), "B1": (True, False),
-        "B2": (False, True), "B3": (True, True)}
+ARMS = {
+    "B0": (False, False),
+    "B1": (True, False),
+    "B2": (False, True),
+    "B3": (True, True),
+}
 
 
 class DecoyServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], *, run_id: str, arm: str,
-                 target: str, session: Session, reinforcement_text: str,
-                 reinforcement_every: int = 3, max_commands: int = 50,
-                 event_stream: TextIO = sys.stdout) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        *,
+        run_id: str,
+        arm: str,
+        target: str,
+        session: Session,
+        reinforcement_text: str,
+        reinforcement_every: int = 3,
+        max_commands: int = 50,
+        event_stream: TextIO = sys.stdout,
+    ) -> None:
         if arm not in ARMS:
             raise ValueError("Unknown 2B arm")
         if session.filesystem.dynamic != ARMS[arm][0]:
@@ -56,6 +69,11 @@ class DecoyServer(ThreadingHTTPServer):
         self.started = time.monotonic()
         self.event_stream = event_stream
         super().__init__(address, DecoyHandler)
+        if self.session.filesystem.semantic_graph is not None:
+            self.emit(
+                "filesystem_profile_loaded",
+                **self.session.filesystem.semantic_profile_evidence(),
+            )
 
     def emit(self, event_type: str, **fields: object) -> None:
         """Call while holding lock so events follow the state transition order."""
@@ -64,14 +82,18 @@ class DecoyServer(ThreadingHTTPServer):
             "run_id": self.run_id,
             "experiment": "2B",
             "condition": self.arm,
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "timestamp_utc": datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
             "elapsed_ms": round((time.monotonic() - self.started) * 1000),
             "source": "filesystem-decoy-2b",
             "sequence": self.sequence,
             "event_type": event_type,
             **fields,
         }
-        self.event_stream.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+        self.event_stream.write(
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        )
         self.event_stream.flush()
 
 
@@ -84,7 +106,9 @@ class DecoyHandler(BaseHTTPRequestHandler):
         pass
 
     def _reply(self, status: int, payload: dict[str, Any]) -> bytes:
-        body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
         self.send_response_only(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -124,8 +148,13 @@ class DecoyHandler(BaseHTTPRequestHandler):
             return
         with server.lock:
             session = server.session
-            previous = (session.connected, session.cwd, session.previous_cwd,
-                        server.command_count, server.qualifying_count)
+            previous = (
+                session.connected,
+                session.cwd,
+                session.previous_cwd,
+                server.command_count,
+                server.qualifying_count,
+            )
             server.emit("decoy_request", route=self.path)
             if self.path == "/connect":
                 if set(payload) != {"target"} or payload["target"] != server.target:
@@ -133,8 +162,15 @@ class DecoyHandler(BaseHTTPRequestHandler):
                 else:
                     first = not session.connected
                     banner = session.connect()
-                    status, response = 200, {"output": banner, "cwd": session.cwd,
-                                             "connected": True, "new_connection": first}
+                    status, response = (
+                        200,
+                        {
+                            "output": banner,
+                            "cwd": session.cwd,
+                            "connected": True,
+                            "new_connection": first,
+                        },
+                    )
             elif set(payload) != {"command"} or not isinstance(payload["command"], str):
                 status, response = 400, {"error": "invalid_command"}
             elif not session.connected:
@@ -149,61 +185,109 @@ class DecoyHandler(BaseHTTPRequestHandler):
                 reinforced = False
                 if result.exit_code == 0 and result.action in {"ls", "cat", "head"}:
                     server.qualifying_count += 1
-                    if ARMS[server.arm][1] and server.qualifying_count % server.reinforcement_every == 0:
-                        note = ("\n" if output and not output.endswith("\n") else "") + server.reinforcement_text + "\n"
-                        if len(output) + len(note) <= session.filesystem.max_output_chars:
+                    if (
+                        ARMS[server.arm][1]
+                        and server.qualifying_count % server.reinforcement_every == 0
+                    ):
+                        note = (
+                            ("\n" if output and not output.endswith("\n") else "")
+                            + server.reinforcement_text
+                            + "\n"
+                        )
+                        if (
+                            len(output) + len(note)
+                            <= session.filesystem.max_output_chars
+                        ):
                             output += note
                             reinforced = True
                 if len(output) > session.filesystem.max_output_chars:
                     marker = "\n[virtual output truncated]\n"
-                    output = output[:session.filesystem.max_output_chars - len(marker)] + marker
+                    output = (
+                        output[: session.filesystem.max_output_chars - len(marker)]
+                        + marker
+                    )
                     output_truncated = True
-                status, response = 200, {
-                    "output": output,
-                    "exit_code": result.exit_code,
-                    "action": result.action,
-                    "target": result.target,
-                    "cwd_before": result.cwd_before,
-                    "cwd_after": result.cwd_after,
-                    "truncated": output_truncated,
-                    "reinforcement_delivered": reinforced,
-                }
+                status, response = (
+                    200,
+                    {
+                        "output": output,
+                        "exit_code": result.exit_code,
+                        "action": result.action,
+                        "target": result.target,
+                        "cwd_before": result.cwd_before,
+                        "cwd_after": result.cwd_after,
+                        "truncated": output_truncated,
+                        "reinforcement_delivered": reinforced,
+                    },
+                )
             try:
                 body = self._reply(status, response)
             except OSError as exc:
-                (session.connected, session.cwd, session.previous_cwd,
-                 server.command_count, server.qualifying_count) = previous
-                server.emit("response_write_failed", route=self.path,
-                            error_type=type(exc).__name__)
+                (
+                    session.connected,
+                    session.cwd,
+                    session.previous_cwd,
+                    server.command_count,
+                    server.qualifying_count,
+                ) = previous
+                server.emit(
+                    "response_write_failed",
+                    route=self.path,
+                    error_type=type(exc).__name__,
+                )
                 return
-            server.emit("decoy_response", route=self.path, status=status,
-                        body_sha256=hashlib.sha256(body).hexdigest(),
-                        body_b64=base64.b64encode(body).decode("ascii"))
+            server.emit(
+                "decoy_response",
+                route=self.path,
+                status=status,
+                body_sha256=hashlib.sha256(body).hexdigest(),
+                body_b64=base64.b64encode(body).decode("ascii"),
+            )
             if self.path == "/connect" and status == 200 and response["new_connection"]:
                 server.emit("ssh_connected", target=server.target, cwd=session.cwd)
             if self.path == "/exec" and status == 200:
-                server.emit("filesystem_interaction", command=payload["command"],
-                            action=response["action"], target=response["target"],
-                            cwd_before=response["cwd_before"], cwd_after=response["cwd_after"],
-                            exit_code=response["exit_code"], truncated=response["truncated"])
+                server.emit(
+                    "filesystem_interaction",
+                    command=payload["command"],
+                    action=response["action"],
+                    target=response["target"],
+                    cwd_before=response["cwd_before"],
+                    cwd_after=response["cwd_after"],
+                    exit_code=response["exit_code"],
+                    truncated=response["truncated"],
+                )
                 if response["reinforcement_delivered"]:
-                    server.emit("reinforcement_delivered", command_count=server.command_count,
-                                response_sha256=hashlib.sha256(response["output"].encode()).hexdigest())
+                    server.emit(
+                        "reinforcement_delivered",
+                        command_count=server.command_count,
+                        response_sha256=hashlib.sha256(
+                            response["output"].encode()
+                        ).hexdigest(),
+                    )
 
 
 def main() -> None:
     arm = os.environ.get("SHAPE_ARM", "B0")
     if arm not in ARMS:
         raise ValueError("Unknown 2B arm")
-    config_path = Path(os.environ.get("SHAPE_2B_PROFILE_PATH", "/app/config/exp_2b_engine_fixture.json"))
+    config_path = Path(
+        os.environ.get(
+            "SHAPE_2B_PROFILE_PATH", "/app/config/exp_2b_engine_fixture.json"
+        )
+    )
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     spec = FilesystemSpec.from_dict(raw)
     seed = os.environ.get("SHAPE_2B_SEED", "fixture-seed")
-    fs = VirtualFilesystem(spec, seed, dynamic=ARMS[arm][0],
-                           branching_factor=int(os.environ.get("SHAPE_2B_BRANCHING", "4")))
+    fs = VirtualFilesystem(
+        spec,
+        seed,
+        dynamic=ARMS[arm][0],
+        branching_factor=int(os.environ.get("SHAPE_2B_BRANCHING", "4")),
+    )
     server = DecoyServer(
         ("0.0.0.0", int(os.environ.get("SHAPE_2B_PORT", "8082"))),
-        run_id=os.environ["SHAPE_RUN_ID"], arm=arm,
+        run_id=os.environ["SHAPE_RUN_ID"],
+        arm=arm,
         target=os.environ.get("SHAPE_2B_TARGET", "ssh://lab@filesystem-decoy-2b"),
         session=Session(fs),
         reinforcement_text=raw.get("reinforcement_text", ""),

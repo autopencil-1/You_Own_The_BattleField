@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "pilot_protocol": "2b-support-pilot-v2",
+  "contract_kind": "execution_freeze",
+  "status": "execution_enabled_not_readiness_passed",
+  "base_candidate_sha256": "4e49a69946952383e5a5e8f944672ce81c7d96055e0bbb4572c2d42a21611696",
+  "supersedes_execution_contract_sha256": "cb24f9b967ca550656c7def98debecaa748c05390a305bc5721bbff262334b2e",
+  "supersession_reason": "v1_cap_label_bug_and_pre_600_executor_turn_exhaustion",
+  "failure_evidence_sha256": {
+    "superseded_execution_contract": "cb24f9b967ca550656c7def98debecaa748c05390a305bc5721bbff262334b2e",
+    "superseded_schedule": "4fac0179ba866a186685fc384a4683608ef1c354f8d28daf98ae9ada4af32cf9",
+    "failed_run_manifest": "56a0ee7dee6bbfca43314c4ca5aeefc7315c54a8cddb959c4d8751a00624661a",
+    "failed_run_result": "dd563f4b30507b28a5f732c55bacddae2df9a90058dfbe03e22a020c5e4ce3bc"
+  },
+  "runtime_policy": {
+    "schema_version": 2,
+    "name": "horizon-support-v2",
+    "max_decisions": 25,
+    "supervisor_max_turns": 4,
+    "executor_max_turns": 500,
+    "executor_turn_policy": "full_declared_ceiling"
+  },
+  "trial_caps": {
+    "max_filesystem_actions": 500,
+    "max_agent_tool_calls": 500,
+    "max_model_calls": 500,
+    "max_model_tokens_input_plus_output": 100000000,
+    "pre_entry_wall_seconds": 180,
+    "post_entry_wall_seconds": 600,
+    "maximum_total_wall_seconds": 780,
+    "retention_horizons_seconds": [
+      60,
+      180,
+      300,
+      600
+    ]
+  },
+  "resource_review": {
+    "approved": true,
+    "basis": "v1_observed_rate_projected_to_780_seconds",
+    "v1_observed_cost_usd": "0.477794960",
+    "v1_observed_total_wall_seconds": "43.561731",
+    "linear_780_second_cost_projection_usd": "8.555217165",
+    "pilot_authorization_usd": "100.00",
+    "minimum_uncommitted_reserve_per_new_run_usd": "15.00",
+    "active_run_cost_termination": false
+  },
+  "frozen_source_sha256": {
+    "base_candidate_contract": "4e49a69946952383e5a5e8f944672ce81c7d96055e0bbb4572c2d42a21611696",
+    "base_candidate_loader": "8016de5f92ea9d478ccd07693e6e3ac1b1834d8314bd1b623944c5ff7e8c4c43",
+    "execution_contract_loader": "822354106084799a24518dfa9cc0166f9ae96ee174e87bc677d4870c60b4688d",
+    "scheduler": "066a0ed928b026c87373c1af88fcd8fbb4db18550f8d3f43abcd0019e5c604d2",
+    "runner_wrapper": "15b0b6eb3312c1d02d4da9bd15648960573a5c57a2f63858554b9c46c2feed9f",
+    "runner": "74d73ea22cee8e4c9371bf7331b9844d63cd3b349e8409a8e5ce8e22ce0bb73f",
+    "runtime_policy": "ff2755f04bfcbb4118abc8fbfe8f492e99c188ce5e5aa9ebe96b8841ce62fe36",
+    "provider_cost_accounting": "234dfce04850fff7d778a824a94f31f358d8e6985ddd197e2fb740bb9b7b963c",
+    "scorer": "4b213e4810bf828da35290bbb2ba01b9734f77a33cc5a22191aebf47af02295b",
+    "replay": "8d9bb26513621f21100f069b1063ef1827fc9a30402fc5b88728e08ddad4f46c",
+    "review_projection": "c5c09a50af5f4e4a9df7076315568a697095d6eef48a62b858a8ad8592e015ca",
+    "adjudication": "83392f31383279395f9075fe1c7311c6518cfd6df9c953b0f3e72b51e5e9c5af"
+  },
+  "execution": {
+    "available": true,
+    "schedule_freeze_available": true,
+    "prepare_makes_model_calls": false,
+    "runs_are_serial": true,
+    "frozen_schedule_order_required": true,
+    "provider_cost_admission_required_before_every_attempt": true,
+    "active_run_cost_termination": false,
+    "superseded_v1_attempt_is_excluded": true
+  }
+}

@@ -16,6 +16,7 @@ import uuid
 from typing import Any
 
 from telemetry.score_2a import load_events, score_events
+from model_gateway.providers import provider_spec
 from .live_capture import LiveCapture
 
 
@@ -29,6 +30,8 @@ EXPECTED_UNIFIED_COMMIT = "acff8eeadf93e367d4a1578d3a2739cbc9d3ace5"
 EXPECTED_CLAUDE_CLI_VERSION = "2.1.206"
 CLAUDE_CLI = "/opt/pentestgpt_agent/.venv/lib/python3.12/site-packages/claude_agent_sdk/_bundled/claude"
 AGENT_IMAGE = "shape-2a-attacker:dev"
+PROVIDER_429_RETRY_DELAYS = (30, 60, 90)
+DECOY_PROTOCOL = "session-v2"
 
 
 def command(args: list[str], *, env: dict[str, str] | None = None, timeout: int = 600, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -48,18 +51,19 @@ def write_private(path: Path, text: str) -> None:
         stream.write(text)
 
 
-def read_key() -> str:
+def read_key(provider: str = "ollama") -> str:
+    key_name = provider_spec(provider)["key_name"]
     for line in (REPO / ".env").read_text(encoding="utf-8").splitlines():
         if line.startswith("export "):
             line = line[7:]
         name, separator, value = line.partition("=")
-        if separator and name.strip() == "ZAI_API_KEY":
+        if separator and name.strip() == key_name:
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
                 value = value[1:-1]
             if value:
                 return value
-    raise ValueError("ZAI_API_KEY is absent from the repository .env")
+    raise ValueError(f"{key_name} is absent from the repository .env")
 
 
 def validate_sources() -> tuple[str, str]:
@@ -71,6 +75,18 @@ def validate_sources() -> tuple[str, str]:
     if EXPECTED_UNIFIED_COMMIT not in project or EXPECTED_UNIFIED_COMMIT not in lock:
         raise ValueError("UnifiedAgent dependency differs from the frozen commit")
     return commit, EXPECTED_UNIFIED_COMMIT
+
+
+def agent_source_sha256() -> str:
+    """Fingerprint the actual maintained agent sources copied into the image."""
+    root = REPO / "PentestGPT" / "pentestgpt_agent"
+    files = [root / "pyproject.toml", root / "uv.lock"]
+    files.extend(sorted((root / "src" / "pentestgpt_agent").glob("*.py")))
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(str(path.relative_to(root)).encode("utf-8") + b"\0")
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def validate_agent_config(config: dict[str, Any]) -> None:
@@ -95,6 +111,19 @@ def count_tool_calls(agent_dir: Path, run_id: str) -> int:
             if event.get("type") == "tool_call":
                 count += 1
     return count
+
+
+def agent_trial_failure(agent_dir: Path, run_id: str) -> str | None:
+    """Surface the durable agent failure instead of only its process exit code."""
+    summary_path = agent_dir / "runs" / run_id / "summary.json"
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(summary, dict) or summary.get("status") != "failed":
+        return None
+    detail = summary.get("error")
+    return detail[:500] if isinstance(detail, str) and detail else None
 
 
 def service_events(project: str, service: str, env: dict[str, str]) -> str:
@@ -130,8 +159,8 @@ def container_credentials(project: str, service: str, env: dict[str, str]) -> di
     names = {item.partition("=")[0] for item in json.loads(inspection[0])}
     mounts = {item["Destination"] for item in json.loads(inspection[1])}
     return {
-        "real_key_in_environment": "ZAI_API_KEY" in names,
-        "real_key_file_mounted": "/run/secrets/zai_api_key" in mounts,
+        "real_key_in_environment": bool({"ZAI_API_KEY", "OLLAMA_API_KEY"} & names),
+        "real_key_file_mounted": "/run/secrets/model_api_key" in mounts,
         "arm_in_environment": "SHAPE_ARM" in names,
         "placeholder_auth": any(item == "ANTHROPIC_AUTH_TOKEN=shape-lab-placeholder" for item in json.loads(inspection[0])),
     }
@@ -165,7 +194,7 @@ import json, os, shutil, socket, urllib.request
 from pathlib import Path
 task = json.loads(Path("/opt/shape/agent_2a_task.json").read_text())
 result = {
-    "real_key_in_agent_env": bool(os.environ.get("ZAI_API_KEY")),
+    "real_key_in_agent_env": bool(os.environ.get("ZAI_API_KEY") or os.environ.get("OLLAMA_API_KEY")),
     "trigger_data_in_agent_image": bool({"arm", "activation"} & task.keys()) or Path("/opt/shape/exp_2a_pilot.json").exists(),
     "http_tools_present": bool(shutil.which("curl") and shutil.which("bash")),
     "build_tools_absent": not shutil.which("git") and not shutil.which("uv"),
@@ -227,20 +256,40 @@ def pinned_cli_version() -> str:
     return version
 
 
+def verify_agent_image_config(expected_sha256: str) -> str:
+    """Reject a reused attacker image whose embedded task differs from the trial."""
+    digest = command([
+        "docker", "run", "--rm", "--entrypoint", "python", AGENT_IMAGE,
+        "-c", "import hashlib; from pathlib import Path; "
+        "print(hashlib.sha256(Path('/opt/shape/agent_2a_task.json').read_bytes()).hexdigest())",
+    ], timeout=30).stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("Attacker image returned an invalid task-config fingerprint")
+    if digest != expected_sha256:
+        raise ValueError("Attacker image has an outdated task goal or settings; rebuild the image before this run")
+    return digest
+
+
 def run(
     mode: str, arm: str, *, build: bool = True,
     assignment: dict[str, Any] | None = None,
     run_id: str | None = None,
+    provider: str = "ollama",
 ) -> dict[str, Any]:
-    if mode not in {"deterministic", "connectivity", "pilot", "controlled"}:
+    provider_spec(provider)
+    if mode not in {"deterministic", "connectivity", "engineering", "pilot", "controlled"}:
         raise ValueError("Invalid mode")
     if mode == "pilot" and arm != "C2":
         raise ValueError(f"The {mode} mode exercises C2 only")
     if (mode == "controlled") != (assignment is not None):
         raise ValueError("Controlled mode requires a frozen assignment; other modes forbid one")
+    if mode == "controlled" and provider != "zai":
+        raise ValueError("The frozen controlled 2A cohort uses Z.AI; prepare a separate Ollama cohort")
     if arm not in {"C0", "C1", "C2"}:
         raise ValueError("Unknown arm")
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
+    if config.get("decoy_protocol") != DECOY_PROTOCOL:
+        raise ValueError("Trial config and decoy protocol differ")
     validate_agent_config(config)
     pentest_commit, unified_commit = validate_sources()
     expected_prefix = "2a-" + mode[:4] + "-"
@@ -254,26 +303,32 @@ def run(
     agent_dir.mkdir(mode=0o700)
     caps = config["caps_per_trial"]
     smoke = mode == "connectivity"
-    max_wall = 240 if smoke else caps["wall_seconds"]
+    max_wall = caps["wall_seconds"]
     max_tools = 20 if smoke else caps["max_agent_tool_calls"]
     max_model_calls = 8 if smoke else caps["max_model_calls"]
-    max_model_tokens = 100000 if smoke else caps["max_model_tokens_input_plus_output"]
+    max_model_tokens = caps["max_model_tokens_input_plus_output"]
     env = dict(os.environ)
     env.update({
         "SHAPE_RUN_ID": run_id,
         "SHAPE_ARM": arm,
+        "SHAPE_DECOY_PROTOCOL": DECOY_PROTOCOL,
         "SHAPE_SMOKE": "1" if smoke else "0",
         "SHAPE_RUN_DIR": str(run_dir.resolve()),
         "LAB_UID": str(os.getuid()),
         "LAB_GID": str(os.getgid()),
         "SHAPE_MAX_MODEL_CALLS": str(max_model_calls),
         "SHAPE_MAX_MODEL_TOKENS": str(max_model_tokens),
+        "SHAPE_MODEL": config["agent"]["model"],
+        "SHAPE_MODEL_PROVIDER": provider,
+        "SHAPE_PROVIDER_429_RETRY_DELAYS": ",".join(map(str, PROVIDER_429_RETRY_DELAYS)) if mode in {"engineering", "pilot", "controlled"} else "",
+        "SHAPE_AGENT_API_TIMEOUT_MS": "960000" if mode in {"engineering", "pilot", "controlled"} else "180000",
     })
     manifest = {
         "schema_version": 1,
         "run_id": run_id,
         "mode": mode,
         "arm": arm,
+        "decoy_protocol": DECOY_PROTOCOL,
         "project": project,
         "started_utc": datetime.now(timezone.utc).isoformat(),
         "config_sha256": hashlib.sha256(CONFIG.read_bytes()).hexdigest(),
@@ -281,13 +336,16 @@ def run(
         "scorer_sha256": hashlib.sha256((LAB / "telemetry" / "score_2a.py").read_bytes()).hexdigest(),
         "controller_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "pentestgpt_commit": pentest_commit,
+        "agent_source_sha256": agent_source_sha256(),
         "unified_agent_commit": unified_commit,
         "model": config["agent"]["model"],
+        "provider": provider if mode != "deterministic" else None,
         "target": config["task"]["target"],
         "max_wall_seconds": max_wall,
         "max_agent_tool_calls": max_tools,
         "max_model_calls": max_model_calls,
         "max_model_tokens": max_model_tokens,
+        "provider_429_retry_delays_seconds": list(PROVIDER_429_RETRY_DELAYS) if mode in {"engineering", "pilot", "controlled"} else [],
     }
     if assignment is not None:
         manifest["assignment"] = assignment
@@ -297,9 +355,9 @@ def run(
     started = 0.0
     live_capture: LiveCapture | None = None
     with tempfile.TemporaryDirectory(prefix="shape2a-key-") as secret_dir:
-        key_file = Path(secret_dir) / "zai_api_key"
+        key_file = Path(secret_dir) / "model_api_key"
         if mode != "deterministic":
-            write_private(key_file, read_key() + "\n")
+            write_private(key_file, read_key(provider) + "\n")
             env["SHAPE_KEY_FILE"] = str(key_file)
         try:
             if build:
@@ -312,11 +370,12 @@ def run(
                 "agent": AGENT_IMAGE,
             }.items()}
             if mode != "deterministic":
+                manifest["agent_image_config_sha256"] = verify_agent_image_config(manifest["agent_config_sha256"])
                 manifest["claude_code_cli_version"] = pinned_cli_version()
             resolved_compose = compose(project, ["config"], env, timeout=30).stdout
             write_private(run_dir / "compose.resolved.yaml", resolved_compose)
             manifest["resolved_compose_sha256"] = hashlib.sha256(resolved_compose.encode()).hexdigest()
-            resolved_config = {**config, "arm": arm}
+            resolved_config = {**config, "arm": arm, "provider": provider if mode != "deterministic" else None}
             resolved_text = json.dumps(resolved_config, indent=2, sort_keys=True) + "\n"
             write_private(run_dir / "trial-config.json", resolved_text)
             manifest["resolved_trial_config_sha256"] = hashlib.sha256(resolved_text.encode()).hexdigest()
@@ -377,6 +436,10 @@ def run(
                         reason = "wall_cap"
                         break
                     gateway_events = parsed_jsonl(service_events(project, "model-gateway", env))
+                    if any(event.get("event_type") in {"provider_rate_limit_exhausted", "provider_rate_limit_rejected"} for event in gateway_events):
+                        reason = "provider_rate_limit"
+                        error = "Provider rate limit persisted after retries" if mode in {"pilot", "controlled"} else "Provider rate limit"
+                        break
                     if any(event.get("event_type") == "cap_reached" for event in gateway_events):
                         reason = "model_cap"
                         break
@@ -408,6 +471,14 @@ def run(
                 except Exception:
                     pass
             compose(project, ["down", "--remove-orphans"], env, timeout=90, check=False)
+    if reason == "agent_exit":
+        gateway_events = parsed_jsonl((run_dir / "gateway-events.jsonl").read_text(encoding="utf-8")) if (run_dir / "gateway-events.jsonl").exists() else []
+        if any(event.get("event_type") in {"provider_rate_limit_exhausted", "provider_rate_limit_rejected"} for event in gateway_events):
+            reason = "provider_rate_limit"
+            error = "Provider rate limit persisted after retries" if mode in {"pilot", "controlled"} else "Provider rate limit"
+    if reason == "agent_exit" and isinstance(agent_exit_code, int) and agent_exit_code != 0 and error is None:
+        agent_failure = agent_trial_failure(agent_dir, run_id)
+        error = agent_failure or f"Attacker agent exited with code {agent_exit_code}"
     manifest["finished_utc"] = datetime.now(timezone.utc).isoformat()
     manifest["termination_reason"] = reason
     manifest["agent_exit_code"] = agent_exit_code
@@ -418,6 +489,7 @@ def run(
         score = score_events(
             load_events(run_dir / "decoy-events.jsonl"), run_id, arm,
             require_condition_delivery=True,
+            protocol=DECOY_PROTOCOL,
         )
     except Exception as exc:
         score = {"scoring_error": f"{type(exc).__name__}: {exc}"}
@@ -432,12 +504,14 @@ def run(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["deterministic", "connectivity", "pilot"], required=True)
+    parser.add_argument("--mode", choices=["deterministic", "connectivity", "engineering", "pilot"], required=True)
     parser.add_argument("--arm", choices=["C0", "C1", "C2"], default="C2")
+    parser.add_argument("--provider", choices=["zai", "ollama"], default="ollama")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--run-id", default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
-    result = run(args.mode, args.arm, build=not args.no_build, run_id=args.run_id)
+    result = run(args.mode, args.arm, build=not args.no_build, run_id=args.run_id,
+                 provider=args.provider)
     print(json.dumps({
         "run_dir": result["run_dir"],
         "termination_reason": result["manifest"]["termination_reason"],

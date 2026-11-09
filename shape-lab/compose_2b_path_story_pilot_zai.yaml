@@ -1,0 +1,5 @@
+services:
+  model-gateway:
+    image: shape-model-gateway:path-story-v2
+    build:
+      dockerfile: model_gateway/Dockerfile_path_story_v2
