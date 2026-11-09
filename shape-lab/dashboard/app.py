@@ -11,12 +11,13 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .core import (RunRequest, JOBS, UI_DIST, capabilities, collector,
                    job_status, list_runs, materialization_page, provisional_snapshot, raw_event_record,
                    run_path, run_snapshot)
 from .jobs import launch_run
+from .pilot_2b import PILOT_ID as PATH_STORY_PILOT_ID, launch_next, public_status
 
 
 app = FastAPI(title="SHAPE experiment console", docs_url=None, redoc_url=None)
@@ -25,6 +26,12 @@ launch_log = logging.getLogger("uvicorn.error")
 
 class LaunchEnvelope(BaseModel):
     run: RunRequest
+    launch_token: str
+
+
+class PilotLaunchEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     launch_token: str
 
 
@@ -88,6 +95,33 @@ async def runs(limit: int = 80) -> dict:
     if not 1 <= limit <= 200:
         raise HTTPException(422, "limit must be 1..200")
     return {"runs": list_runs(limit)}
+
+
+@app.get("/api/2b/path-story-pilot")
+async def path_story_pilot_status() -> dict:
+    try:
+        return await asyncio.to_thread(public_status)
+    except Exception as exc:
+        return {
+            "pilot_id": PATH_STORY_PILOT_ID,
+            "phase": "integrity_error",
+            "launch_available": False,
+            "launch_reason": f"Frozen pilot check failed: {type(exc).__name__}: {exc}",
+        }
+
+
+@app.post("/api/2b/path-story-pilot/run-next", status_code=202)
+async def path_story_pilot_run_next(request: Request, payload: PilotLaunchEnvelope) -> dict:
+    _guard_launch(request, payload.launch_token)
+    try:
+        current = await asyncio.to_thread(public_status)
+        if not current["launch_available"]:
+            raise HTTPException(409, current["launch_reason"] or "Frozen pilot is unavailable")
+        return await asyncio.to_thread(launch_next, current)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(409, f"Frozen pilot launch failed: {type(exc).__name__}: {exc}") from exc
 
 
 @app.post("/api/runs", status_code=202)

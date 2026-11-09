@@ -2,12 +2,15 @@
 
 This local UI has an index page for 2A and 2B, archived-run viewing, live
 agent and decoy events, and allowlisted launch controls. It offers 2A C2 pilot,
-2A connectivity, 2B B0 connectivity, and model-free deterministic checks.
+2A connectivity, the next frozen 2B path-story pilot assignment, 2B B0
+connectivity, and model-free deterministic checks.
 The 2B connectivity run uses the integrated schema-v2 `ledger-prod-01`
 engineering fixture and remains separate from experiment evidence. The frozen
-2B B0-B3 pilot is deliberately CLI-controlled and is not launched by this UI.
-CLI-run path-story pilot attempts appear in the archive and can be monitored
-here. Their page shows the pilot slot, pre-entry and post-entry clocks, live
+2B B0-B3 pilot uses its controller's schedule and admission checks. The UI
+can start one next assignment only when that controller reports readiness; it
+cannot select an arm or seed or bypass a provider-rate-limit pause. Path-story
+pilot attempts appear in the archive and can be monitored here. Their page
+shows the pilot slot, pre-entry and post-entry clocks, live
 filesystem and model counters, and the qualified entry time. Decoy and gateway
 event journals appear after the run finishes; generated paths are paged from
 the hash-checked materialization inventory. A provider rate limit is shown as
@@ -16,16 +19,25 @@ slot validity; the pilot controller remains the eligibility authority.
 
 ## Start
 
-From the repository root, put a nonempty `ZAI_API_KEY` or `OLLAMA_API_KEY` in `.env`, then run:
+From the repository root, put a nonempty `ZAI_API_KEY` or `OLLAMA_API_KEY` in `.env`.
+To open the console for the existing frozen 2B pilot, run:
+
+```sh
+make serve
+```
+
+This builds the console and starts its local service without rebuilding the
+Docker images pinned by the pilot. For initial engineering setup before a
+freeze, run:
 
 ```sh
 make up
 ```
 
-This installs dashboard dependencies, builds the frontend and both sets of
-Docker images, and starts the host-side dashboard in the background. It does
-not start an agent or call a model until you launch a model-backed run in the
-UI. Open <http://127.0.0.1:8787/>. Use `make status` to check the server and
+That also builds both sets of Docker images. Rebuilding them after the pilot
+freeze can cause its image-integrity check to reject a new assignment. Neither
+command starts an agent or calls a model. Open <http://127.0.0.1:8787/>.
+Use `make status` to check the server and
 `make down` to stop the dashboard. Active trial workers continue to their
 controller cap if the dashboard is stopped. Logs and the service PID live in
 ignored `shape-lab/runs/.dashboard-service/`.
@@ -40,20 +52,23 @@ Node.js is needed only to build or edit the frontend. For development, run
 `npm run dev` in `dashboard_ui/`; its API proxy points at the local Python
 server.
 
-Select 2A or 2B, choose an available mode and arm, review the effective caps,
-and click **Run experiment**. The default reuses images built by `make up`;
-select **Rebuild Docker images** after changing image sources. 2B accepts a
-validated fixture seed, and deterministic checks accept a branching factor.
-The 2A pilot uses C2 only; 2B connectivity uses B0 only. One dashboard job
-runs at a time.
+For 2B, the home card shows the current frozen pilot's valid-slot count, next
+slot, admission state, and any rate-limit pause. **Run next pilot trial** starts
+one controller-selected assignment when admission is open; the dashboard then
+opens its run page when the controller creates the run ID. The separate
+**Engineering checks** action opens the B0 connectivity and model-free fixture
+settings. Those checks can reuse existing images or rebuild after source edits,
+and deterministic checks accept a fixture seed and branching factor. The 2A
+pilot uses C2 only. One dashboard job runs at a time.
 
 The 2A New run action selects the full C2 engineering pilot. It uses the
 maintained PentestGPT Supervisor/Executor loop, with up to 20 decisions, and
 shows discovery, test, activation, treatment delivery, and both canary stages
 as they are observed. The Access report stage records a successful visit to
 the shared cookie-protected report; it does not count as a canary hit. New 2A
-and 2B runs default to the Ollama Cloud key;
-Z.AI remains selectable. The frozen controlled 2A cohort explicitly uses Z.AI.
+and 2B engineering runs default to the Ollama Cloud key;
+Z.AI remains selectable. The frozen 2B path-story pilot uses Z.AI by its
+contract. The frozen controlled 2A cohort explicitly uses Z.AI.
 Both providers have produced agent streams without a terminal event in
 engineering pilots, so those failures are not defense outcomes.
 If a Claude Supervisor stream loses its terminal event after producing one

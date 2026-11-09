@@ -79,6 +79,19 @@ type PathStoryProgress = {
 }
 type Materialization = { inventory_index: number; path: string; node_sha256: string; response_sequence: number }
 type MaterializationPage = { items: Materialization[]; total: number; has_more: boolean; next_after: number; verified: boolean; available: boolean }
+type PathStoryPilotStatus = {
+  pilot_id?: string
+  pilot_protocol?: string
+  phase: string
+  valid_runs?: number
+  scheduled_runs?: number
+  next_slot?: number | null
+  pending_run?: { run_id: string } | null
+  launch_available: boolean
+  launch_reason?: string | null
+  credits?: { rate_limit_pause_until_utc?: string | null; remaining_total?: string | null } | null
+}
+type PilotJob = { job_id?: string; status: string; run_id?: string | null; error?: string | null }
 type FormState = {
   experiment: Experiment
   mode: RunMode
@@ -300,6 +313,13 @@ function App() {
   const [materializationVerified, setMaterializationVerified] = useState(false)
   const [materializationLoading, setMaterializationLoading] = useState(false)
   const [materializationError, setMaterializationError] = useState<string | null>(null)
+  const [pilotStatus, setPilotStatus] = useState<PathStoryPilotStatus | null>(null)
+  const [pilotStatusLoading, setPilotStatusLoading] = useState(false)
+  const [pilotStatusError, setPilotStatusError] = useState<string | null>(null)
+  const [pilotActionError, setPilotActionError] = useState<string | null>(null)
+  const [pilotStatusRefresh, setPilotStatusRefresh] = useState(0)
+  const [pilotLaunching, setPilotLaunching] = useState(false)
+  const [pilotJobId, setPilotJobId] = useState<string | null>(null)
   const modalOpen = form !== null
   const pathStory = snapshot?.run_id === runId && snapshot?.experiment === '2B' &&
     (snapshot.mode === 'path_story_pilot' || snapshot.pilot_protocol?.startsWith('2b-path-story') === true)
@@ -351,6 +371,58 @@ function App() {
     const interval = window.setInterval(refresh, 3000)
     return () => { alive = false; window.clearInterval(interval) }
   }, [runId])
+
+  useEffect(() => {
+    if (runId) return
+    let alive = true
+    let busy = false
+    async function refresh() {
+      if (busy) return
+      busy = true
+      setPilotStatusLoading(true)
+      try {
+        const state = await getJSON<PathStoryPilotStatus>('/api/2b/path-story-pilot')
+        if (alive) { setPilotStatus(state); setPilotStatusError(null) }
+      } catch (err) {
+        if (alive) { setPilotStatus(null); setPilotStatusError(String(err)) }
+      } finally {
+        busy = false
+        if (alive) setPilotStatusLoading(false)
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(refresh, 20000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [runId, pilotStatusRefresh])
+
+  useEffect(() => {
+    if (!pilotJobId || runId) return
+    let alive = true
+    let busy = false
+    async function refresh() {
+      if (busy) return
+      busy = true
+      try {
+        const job = await getJSON<PilotJob>(`/api/jobs/${encodeURIComponent(pilotJobId as string)}`)
+        if (!alive) return
+        if (job.run_id) {
+          setPilotJobId(null)
+          navigate(job.run_id)
+        } else if (['failed', 'complete', 'not_admitted'].includes(job.status)) {
+          setPilotJobId(null)
+          setPilotActionError(job.error || 'The pilot worker ended before admitting a run.')
+          setPilotStatusRefresh(previous => previous + 1)
+        }
+      } catch (err) {
+        if (alive) { setPilotJobId(null); setPilotActionError(String(err)) }
+      } finally {
+        busy = false
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(refresh, 2000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [pilotJobId, runId])
 
   useEffect(() => {
     if (!runId) return
@@ -596,6 +668,32 @@ function App() {
     }
   }
 
+  async function launchPathStoryPilot() {
+    if (!pilotStatus?.launch_available || pilotLaunching || pilotJobId) return
+    setPilotLaunching(true)
+    setPilotActionError(null)
+    try {
+      const session = await getJSON<{ launch_token: string }>('/api/session')
+      const response = await fetch('/api/2b/path-story-pilot/run-next', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ launch_token: session.launch_token }),
+      })
+      if (!response.ok) {
+        const detail = (await response.text()).trim()
+        throw new Error(detail ? `${response.status}: ${detail}` :
+          `${response.status}: Open the dashboard locally at 127.0.0.1:8787 to start the pilot.`)
+      }
+      const job = await response.json() as PilotJob
+      if (!job.job_id) throw new Error('The pilot launcher returned no dashboard job ID.')
+      setPilotJobId(job.job_id)
+      setPilotStatusRefresh(previous => previous + 1)
+    } catch (err) {
+      setPilotActionError(String(err))
+    } finally {
+      setPilotLaunching(false)
+    }
+  }
+
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand" onClick={() => navigate(null)} role="button" tabIndex={0} onKeyDown={event => { if (event.key === 'Enter') navigate(null) }}>
@@ -616,7 +714,28 @@ function App() {
           <h2>{experiment === '2A' ? 'OBEY' : 'EXPLORE'}</h2>
           <p>{experiment === '2A' ? 'Track web probes, activation, and the two canary stages.' : 'Track virtual shell commands and the filesystem that answers them.'}</p>
           <div className="arm-tags">{armChoices[experiment].map(arm => <span key={arm}>{arm}</span>)}</div>
-          <button className="primary-button" onClick={() => { setForm({ experiment, mode: experiment === '2A' ? 'pilot' : 'connectivity', arm: experiment === '2A' ? 'C2' : 'B0', provider: 'ollama', seed: 'fixture-seed', branching_factor: 4, build: false }); setError(null) }}>New run <span>→</span></button>
+          {experiment === '2A' ? <button className="primary-button" onClick={() => { setForm({ experiment: '2A', mode: 'pilot', arm: 'C2', provider: 'ollama', seed: 'fixture-seed', branching_factor: 4, build: false }); setError(null) }}>New run <span>→</span></button> : <div className="pilot-launch">
+            <div className="pilot-launch-status" aria-live="polite">
+              <strong>Frozen path-story pilot</strong>
+              {pilotStatus ? <>
+                <span>{typeof pilotStatus.valid_runs === 'number' && typeof pilotStatus.scheduled_runs === 'number' ? `${pilotStatus.valid_runs}/${pilotStatus.scheduled_runs} valid slots · ` : ''}{phaseName(pilotStatus.phase)}</span>
+                {pilotStatus.pilot_id && <span className="pilot-id">{pilotStatus.pilot_id}</span>}
+                {typeof pilotStatus.next_slot === 'number' && <span>Next scheduled slot {pilotStatus.next_slot} · Z.AI model-backed trial</span>}
+                {pilotStatus.phase === 'paused_provider_rate_limit' && pilotStatus.credits?.rate_limit_pause_until_utc && <span>Rate-limit pause until {timestamp(pilotStatus.credits.rate_limit_pause_until_utc)}</span>}
+                {pilotStatus.credits?.remaining_total && <span>Estimated pilot credit share remaining: {pilotStatus.credits.remaining_total}</span>}
+                {!pilotStatus.launch_available && pilotStatus.launch_reason && <span className="pilot-launch-reason">{pilotStatus.launch_reason}</span>}
+              </> : <span>{pilotStatusLoading ? 'Checking frozen schedule and admission…' : 'Pilot status unavailable'}</span>}
+              {pilotStatusError && <span className="pilot-launch-reason">{pilotStatusError}</span>}
+              {pilotActionError && <span className="pilot-launch-reason">{pilotActionError}</span>}
+              {pilotJobId && <span>Starting the next scheduled assignment…</span>}
+            </div>
+            <div className="pilot-launch-actions">
+              <button className="primary-button" disabled={!pilotStatus?.launch_available || pilotLaunching || Boolean(pilotJobId)} onClick={launchPathStoryPilot}>{pilotLaunching || pilotJobId ? 'Starting trial…' : 'Run next pilot trial'} <span>→</span></button>
+              <button type="button" className="pilot-secondary" onClick={() => { setForm({ experiment: '2B', mode: 'connectivity', arm: 'B0', provider: 'ollama', seed: 'fixture-seed', branching_factor: 4, build: false }); setError(null) }}>Engineering checks</button>
+              <button type="button" className="pilot-refresh" disabled={pilotStatusLoading} onClick={() => setPilotStatusRefresh(previous => previous + 1)}>Refresh status</button>
+            </div>
+            {pilotStatus?.pending_run?.run_id && <button type="button" className="pilot-pending-link" onClick={() => navigate(pilotStatus.pending_run!.run_id)}>View admitted run {pilotStatus.pending_run.run_id} ↗</button>}
+          </div>}
         </article>)}
       </div>
       <section className="recent-section">

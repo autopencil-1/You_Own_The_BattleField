@@ -6,9 +6,13 @@ ifneq ($(NVM_NODE_DIR),)
 export PATH := $(NVM_NODE_DIR):$(PATH)
 endif
 
-.PHONY: up down status setup images check
+.PHONY: up serve down status setup images check
 
 up: images
+	@cd "$(LAB)" && "$(VENV)/bin/python" -m dashboard.service restart
+
+# Keep frozen pilot image IDs intact while refreshing only the console.
+serve: setup
 	@cd "$(LAB)" && "$(VENV)/bin/python" -m dashboard.service restart
 
 down:
