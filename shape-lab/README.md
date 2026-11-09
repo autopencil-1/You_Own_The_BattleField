@@ -1,9 +1,32 @@
 # SHAPE Lab
 
-This lab runs a synthetic web decoy, a pinned PentestGPT agent, and a bounded Z.AI model gateway. The trial inputs and caps are frozen in [2A_TRIAL_CONTRACT.md](2A_TRIAL_CONTRACT.md) and [config/exp_2a_pilot.json](config/exp_2a_pilot.json). The route and scoring design is in [WEB_DECOY_2A_PLAN.md](WEB_DECOY_2A_PLAN.md). The proposed three-arm study is in [CONTROLLED_2A_ESTIMATION_PLAN.md](CONTROLLED_2A_ESTIMATION_PLAN.md).
+This lab runs a synthetic web decoy, a pinned PentestGPT agent, and a bounded model gateway with Z.AI and Ollama Cloud upstreams. The trial inputs and caps are frozen in [2A_TRIAL_CONTRACT.md](2A_TRIAL_CONTRACT.md) and [config/exp_2a_pilot.json](config/exp_2a_pilot.json). The route and scoring design is in [WEB_DECOY_2A_PLAN.md](WEB_DECOY_2A_PLAN.md). The proposed three-arm study is in [CONTROLLED_2A_ESTIMATION_PLAN.md](CONTROLLED_2A_ESTIMATION_PLAN.md).
+
+The 2A `session-v2` decoy provides a protected account page and substantive
+verification and audit results. The server, scorer, replay, and dashboard are
+implemented and have passed model-free C0/C1/C2 checks. Fresh model-backed C2
+pilots are needed to evaluate autonomous agent behavior. The implementation
+record is in
+[2A_SESSION_V2_IMPLEMENTATION_PLAN.md](2A_SESSION_V2_IMPLEMENTATION_PLAN.md).
 
 The story-independent 2B virtual filesystem, imitated SSH tools, and model-free
 fixture checks are documented in [filesystem_decoy_2b/README.md](filesystem_decoy_2b/README.md).
+The frozen 2B pilot boundary, objective measurements, and annotation rubric
+are in [2B_TRIAL_CONTRACT.md](2B_TRIAL_CONTRACT.md), with machine-readable
+settings in [config/exp_2b_pilot.json](config/exp_2b_pilot.json). They pin the
+existing PentestGPT task by hash. The preserved v1 diagnostic pilot exposed a
+turn-cap classification error; the versioned v2 controller treats a durable
+PentestGPT `max_turns` terminal state as a valid right-censored outcome without
+changing that task.
+Pilot v3 completed and passed its committed readiness gate. The active
+[controlled 2B v2 estimation plan](CONTROLLED_2B_V2_ESTIMATION_PLAN.md) and
+[machine-readable contract](config/exp_2b_controlled_v2.json) freeze the
+40-run 2x2 study. Controlled-v2 gives each run at most 180 seconds to qualify
+for entry and then a separate 600-second post-entry clock, for a maximum
+nominal 780 seconds. Its model-free scheduler, replay, blinded
+two-review/adjudication gate, censor-aware analysis, and immutable output
+bundle are implemented; no controlled schedule or controlled estimate exists.
+The superseded v1 contract remains preserved and was never scheduled.
 The proposed 2A/2B monitoring and experiment launch console is specified in
 [SHAPE_EXPERIMENT_UI_PLAN.md](SHAPE_EXPERIMENT_UI_PLAN.md); the detailed 2B
 monitor pane is in [2B_MONITOR_UI_PLAN.md](2B_MONITOR_UI_PLAN.md).
@@ -12,8 +35,18 @@ The first local UI slice and its startup instructions are in
 
 From the repository root, `make up` prepares both Docker image sets and the
 local dashboard at <http://127.0.0.1:8787/>. `make down` stops the dashboard.
-The repository root `.env` supplies `ZAI_API_KEY` for agent runs; pinned agent
-settings remain in `config/agent_2a_task.json` and `config/agent_2b_task.json`.
+The repository root `.env` supplies `ZAI_API_KEY` or `OLLAMA_API_KEY` for agent
+runs. New dashboard and CLI runs default to Ollama Cloud; Z.AI remains selectable.
+New runs use pinned
+`glm-5.3` agent settings in `config/agent_2a_task.json` and
+`config/agent_2b_task.json`. Earlier `glm-5.3-flash` runs remain a separate
+model cohort in the archive. Ollama Cloud runs are archived under their own
+provider label and do not qualify as Z.AI controlled-cohort pilot evidence.
+Run manifests now include the maintained agent source hash as well as the image
+ID, so transcript recovery changes cannot be pooled with earlier pilots.
+New model-backed runs have a 100,000,000-token per-run gateway cap; their
+wall-clock, tool-call, and model-call limits still apply. The older 200,000
+token pilots are a separate configuration cohort.
 
 ## Run a check
 
@@ -24,9 +57,23 @@ python3 -m unittest discover -s tests -v
 docker compose --profile agent -f compose.yaml config --quiet
 python3 -m experiment_controller.run_2a --mode deterministic
 python3 -m experiment_controller.run_2a --mode connectivity
+python3 -m experiment_controller.controlled_2b contract-status
 ```
 
-`deterministic` checks the decoy without a model call; pass `--arm C0`, `--arm C1`, or `--arm C2` to check each condition. `connectivity` builds the pinned agent and gateway, then stops when it observes both a successful model response and a decoy request, or when a smoke cap is reached. It requires `ZAI_API_KEY` in the repository root `.env`. Use `--no-build` to reuse images already built from the same source. For the C2 engineering pilot, use `--mode pilot --arm C2`. Controlled C0/C1/C2 trials follow a separate protocol after pilot validation.
+`deterministic` checks the decoy without a model call; pass `--arm C0`, `--arm C1`, or `--arm C2` to check each condition. `connectivity` builds the pinned agent and gateway, then stops when it observes both a successful model response and a decoy request, or when a smoke cap is reached. Model-backed runs require the selected provider key in the repository root `.env`. Omit `--provider` for Ollama Cloud, or use `--provider zai` for Z.AI. Use `--no-build` to reuse images already built from the same source. For a C2 pilot gate run, use `--mode pilot --arm C2`. Use `--mode engineering --arm C0|C1|C2` for exploratory model-backed monitoring; those runs do not qualify for the controlled-study gate. Controlled C0/C1/C2 trials follow a separate protocol after pilot validation and remain pinned to Z.AI.
+
+For 2A pilot and controlled runs, the gateway retries an upstream HTTP 429 on
+the same model request after 30, 60, and 90 seconds. A fourth 429 ends the run
+with `provider_rate_limit`; retries are recorded in the gateway event archive
+and do not reset the agent or trial caps. Connectivity checks retain their
+shorter wall cap and do not use this retry schedule.
+
+The controlled 2B lifecycle is exposed separately as `prepare`, `status`,
+`execute`, `packets`, `review-status`, and `analyze` actions under
+`python3 -m experiment_controller.controlled_2b`. `prepare` creates and commits
+the real 40-slot controlled-v2 schedule. `contract-status` is read-only and
+makes no model call; `prepare` is model-free but is intentionally not invoked
+by setup or tests.
 
 ## Attacker image
 

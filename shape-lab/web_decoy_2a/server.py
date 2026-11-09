@@ -14,7 +14,7 @@ import threading
 import time
 from typing import TextIO
 
-from .state import Decision, TrialState, load_trigger_pattern
+from .state import DECOY_PROTOCOL, Decision, TrialState, load_trigger_pattern
 
 
 class DecoyHTTPServer(ThreadingHTTPServer):
@@ -39,6 +39,7 @@ class DecoyHTTPServer(ThreadingHTTPServer):
         event = {
             "run_id": self.trial.run_id,
             "experiment": "2A",
+            "decoy_protocol": DECOY_PROTOCOL,
             "condition": self.trial.arm,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
             "elapsed_ms": round((time.monotonic() - self.started_at) * 1000),
@@ -53,7 +54,7 @@ class DecoyHTTPServer(ThreadingHTTPServer):
 
 class DecoyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "ShapeLab/1.0"
+    server_version = "ShapeLab/2.0"
     sys_version = ""
 
     def __getattr__(self, name: str):
@@ -98,7 +99,11 @@ class DecoyHandler(BaseHTTPRequestHandler):
         with server.trial_lock:
             trial = server.trial
             before = trial.phase.value
-            decision = trial.decide(self.command, self.path, self.headers.get("Content-Length"))
+            cookie_headers = self.headers.get_all("Cookie", [])
+            cookie_header = cookie_headers[0] if len(cookie_headers) == 1 else None
+            decision = trial.decide(
+                self.command, self.path, self.headers.get("Content-Length"), cookie_header
+            )
             body = b"" if self.command == "HEAD" else decision.body
             headers = [
                 ("Content-Type", decision.content_type),
@@ -106,6 +111,13 @@ class DecoyHandler(BaseHTTPRequestHandler):
                 ("Content-Length", str(len(body))),
                 ("Connection", "close"),
             ]
+            if decision.set_cookie:
+                if not decision.session_cookie:
+                    raise RuntimeError("Cookie response lacks a session value")
+                headers.append((
+                    "Set-Cookie",
+                    f"shape_session={decision.session_cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200",
+                ))
             if not decision.health:
                 server.emit(
                     "decoy_request",
@@ -138,6 +150,15 @@ class DecoyHandler(BaseHTTPRequestHandler):
                 return
             trial.commit(decision)
             after = trial.phase.value
+            cookie_hash = (
+                hashlib.sha256(decision.session_cookie.encode()).hexdigest()
+                if decision.set_cookie and decision.session_cookie else None
+            )
+            archived_headers = [
+                (name, value if name != "Set-Cookie" else
+                 "shape_session=[redacted]; Path=/; HttpOnly; SameSite=Lax; Max-Age=7200")
+                for name, value in headers
+            ]
             server.emit(
                 "decoy_response",
                 method=self.command,
@@ -145,7 +166,9 @@ class DecoyHandler(BaseHTTPRequestHandler):
                 status=decision.status,
                 state_before=before,
                 state_after=after,
-                headers=headers,
+                headers=archived_headers,
+                cookie_issued=decision.set_cookie,
+                cookie_sha256=cookie_hash,
                 body_sha256=hashlib.sha256(body).hexdigest(),
                 body_b64=base64.b64encode(body).decode("ascii"),
             )
@@ -165,6 +188,12 @@ class DecoyHandler(BaseHTTPRequestHandler):
             if decision.transition.value == "ACTIVATED":
                 server.emit("activation", trigger_field=decision.trigger_field, **common)
                 server.emit(
+                    "auth_session_created",
+                    sign_in_event_id=decision.sign_in_event_id,
+                    cookie_sha256=hashlib.sha256(decision.session_cookie.encode()).hexdigest(),
+                    **common,
+                )
+                server.emit(
                     "condition_response_delivered",
                     variant=server.trial.arm,
                     body_sha256=hashlib.sha256(decision.body).hexdigest(),
@@ -182,6 +211,30 @@ class DecoyHandler(BaseHTTPRequestHandler):
                 first_activation=decision.transition is not None,
                 **common,
             )
+        if decision.account_authenticated is not None:
+            server.emit(
+                "account_access",
+                authenticated=decision.account_authenticated,
+                sign_in_event_id=decision.sign_in_event_id,
+                cookie_sha256=(
+                    hashlib.sha256(server.trial.session_cookie.encode()).hexdigest()
+                    if decision.account_authenticated else None
+                ),
+                **common,
+            )
+        if decision.verification_valid is not None:
+            server.emit(
+                "verification_result",
+                valid=decision.verification_valid,
+                session_active=decision.verification_valid,
+                cookie_reissued=decision.set_cookie,
+                sign_in_event_id=decision.sign_in_event_id,
+                cookie_sha256=(
+                    hashlib.sha256(decision.session_cookie.encode()).hexdigest()
+                    if decision.set_cookie and decision.session_cookie else None
+                ),
+                **common,
+            )
         if decision.invalid_canary:
             server.emit("invalid_canary", **common)
 
@@ -194,6 +247,8 @@ def main() -> None:
         )
     )
     pattern = load_trigger_pattern(config_path)
+    if os.environ.get("SHAPE_DECOY_PROTOCOL", DECOY_PROTOCOL) != DECOY_PROTOCOL:
+        raise ValueError("Controller and decoy protocol differ")
     trial = TrialState(
         arm=os.environ.get("SHAPE_ARM", "C2"),
         run_id=os.environ.get("SHAPE_RUN_ID", "2a-dev"),

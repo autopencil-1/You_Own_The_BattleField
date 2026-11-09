@@ -71,11 +71,12 @@ make the dashboard look more active.
 |---|---|---|---|
 | 2A | Deterministic check | Model-free decoy check for C0/C1/C2 | Select arm; label result **fixture check** |
 | 2A | Connectivity check | Bounded real-agent smoke | Select arm; label **engineering check**, not treatment result |
-| 2A | C2 pilot | Full C2 engineering pilot with frozen task/caps | C2 fixed; show model-use and 20-minute cap before launch |
+| 2A | C2 pilot | Full C2 engineering pilot with frozen task/caps | C2 fixed; show model-use and two-hour cap before launch |
 | 2A | Controlled cohort | Separate `controlled_2a.py` prepare/execute/status workflow, with pilot and fingerprint gates | Dedicated study workflow: prepare balanced schedule, preview, then execute; individual arm/cap controls disabled |
 | 2B | Deterministic check | Model-free B0/B1/B2/B3 fixture | Select arm and validated seed; label **fixture check** |
-| 2B | Connectivity check | B0-only, bounded real-agent check on generic fixture | Available after the user's explicit approval; label it an engineering check, never a study result |
-| 2B | Pilot and 40-run study | Not implemented yet | Show **planned**, not a functioning launch button; implement after story/profile freeze |
+| 2B | Connectivity check | B0-only, bounded real-agent check on the schema-v2 `ledger-prod-01` fixture | Available after the user's explicit approval; label it an engineering check, never a study result |
+| 2B | Frozen pilot | Separate `pilot_2b.py` prepare/execute/status/gate workflow; implemented but not run | Keep CLI-only for now; do not expose an ad-hoc arm selector or bypass its frozen schedule/fingerprint |
+| 2B | Approximately 40-run study | Pending a passing pilot readiness gate | Show **planned**, not a functioning launch button |
 
 The home page must never make fixture checks look like agent outcomes. For a
 controlled cohort, the existing readiness and fingerprint checks remain in

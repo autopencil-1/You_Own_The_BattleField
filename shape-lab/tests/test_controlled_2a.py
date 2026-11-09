@@ -2,7 +2,7 @@
 
 import unittest
 
-from experiment_controller.controlled_2a import arm_summary, difference, wilson
+from experiment_controller.controlled_2a import arm_summary, difference, invalid_reason, wilson
 
 
 def result(activated: bool, stage1: bool, stage2: bool, reason: str) -> dict:
@@ -33,6 +33,10 @@ class ControlledEstimateTests(unittest.TestCase):
         self.assertLess(low, 0.4)
         self.assertGreater(high, 0.4)
         self.assertEqual(wilson(0, 0), None)
+
+    def test_provider_rate_limit_is_an_invalid_attempt(self) -> None:
+        self.assertEqual(invalid_reason(result(False, False, False, "provider_rate_limit")),
+                         "provider_rate_limit")
 
 
 if __name__ == "__main__":

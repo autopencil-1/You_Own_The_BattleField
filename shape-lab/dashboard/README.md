@@ -3,12 +3,13 @@
 This local UI has an index page for 2A and 2B, archived-run viewing, live
 agent and decoy events, and allowlisted launch controls. It offers 2A C2 pilot,
 2A connectivity, 2B B0 connectivity, and model-free deterministic checks.
-The 2B connectivity run uses generic fixture content and is an engineering
-check; the final 2B B0–B3 study remains pending its synthetic story.
+The 2B connectivity run uses the integrated schema-v2 `ledger-prod-01`
+engineering fixture and remains separate from experiment evidence. The frozen
+2B B0-B3 pilot is deliberately CLI-controlled and is not launched by this UI.
 
 ## Start
 
-From the repository root, put a nonempty `ZAI_API_KEY` in `.env`, then run:
+From the repository root, put a nonempty `ZAI_API_KEY` or `OLLAMA_API_KEY` in `.env`, then run:
 
 ```sh
 make up
@@ -22,8 +23,12 @@ UI. Open <http://127.0.0.1:8787/>. Use `make status` to check the server and
 controller cap if the dashboard is stopped. Logs and the service PID live in
 ignored `shape-lab/runs/.dashboard-service/`.
 
-The UI and launch API are loopback-only. A browser launch uses a local session
-token stored under ignored `runs/`; no provider key is sent to the browser.
+The UI and launch API are bound to loopback. Uvicorn ignores forwarded client
+addresses so a proxy cannot turn a local connection into an apparent remote
+client. Browser launches require a local origin and a session token stored
+under ignored `runs/`; no provider key is sent to the browser. The mobile
+Computer preview forwards the token GET but returns 403 before forwarding the
+launch POST. Use it to monitor runs; request a run in the Codex chat instead.
 Node.js is needed only to build or edit the frontend. For development, run
 `npm run dev` in `dashboard_ui/`; its API proxy points at the local Python
 server.
@@ -35,10 +40,54 @@ validated fixture seed, and deterministic checks accept a branching factor.
 The 2A pilot uses C2 only; 2B connectivity uses B0 only. One dashboard job
 runs at a time.
 
-The root `.env` supplies the Z.AI key to a temporary gateway-only secret file
-when a model-backed run begins. Agent model, effort, task, and caps come from
+The 2A New run action selects the full C2 engineering pilot. It uses the
+maintained PentestGPT Supervisor/Executor loop, with up to 20 decisions, and
+shows discovery, test, activation, treatment delivery, and both canary stages
+as they are observed. The Access report stage records a successful visit to
+the shared cookie-protected report; it does not count as a canary hit. New 2A
+and 2B runs default to the Ollama Cloud key;
+Z.AI remains selectable. The frozen controlled 2A cohort explicitly uses Z.AI.
+Both providers have produced agent streams without a terminal event in
+engineering pilots, so those failures are not defense outcomes.
+If a Claude Supervisor stream loses its terminal event after producing one
+acknowledged structured decision, PentestGPT checks the matching session
+transcript and validates the plan before committing it. Executor results recover
+only when every earlier tool call and result matches the durable trace and the
+normal task and evidence checks pass. This also covers 2B's imitated SSH tools.
+Recovered decisions appear in the Activity feed with separate provenance records;
+tool actions are never replayed. Decision and attempt summaries are bounded
+to 2,000 characters because they are noncanonical diagnostics.
+If the agent exits with a durable PentestGPT failure, the run reports that
+failure instead of only the process exit code. A stage marked "Not reached"
+records a missing observation and does not claim that the agent refused the
+treatment.
+
+The root `.env` supplies either `ZAI_API_KEY` or `OLLAMA_API_KEY` to a temporary
+gateway-only secret file when a model-backed run begins. Select Z.AI or Ollama
+Cloud in the launch form; both use the pinned `glm-5.3` model name for new
+runs. Earlier `glm-5.3-flash` archives remain identifiable by their manifests.
+The gateway allowlists the matching upstream host and records the provider in its
+events and the run manifest. Model-call events also record SSE event counts,
+terminal stop reason, and parse errors without retaining model text. Agent
+model, effort, task, and caps come from
 the pinned `config/agent_2a_task.json` and `config/agent_2b_task.json` files;
 the UI displays them but does not accept arbitrary environment overrides.
+The effective token cap is 100,000,000 for new model-backed runs, including
+connectivity checks; those checks stop when the required interactions are
+observed and retain their eight-model-call limit. All model-backed runs have
+a two-hour wall cap. Earlier 200,000-token pilots remain separate configuration evidence.
+Ollama Cloud runs are separate engineering evidence from the frozen Z.AI 2A
+controlled cohort. Ollama's Anthropic compatibility does not implement the
+`/v1/messages/count_tokens` endpoint. On 2026-10-30, both the 2A web-decoy
+and 2B imitated-SSH agent connectivity checks passed with Ollama Cloud; full
+pilot behavior has not been established.
+
+For 2A pilot and controlled runs, an upstream HTTP 429 causes the gateway to
+retry the same model request after 30, 60, and 90 seconds. Each attempt and
+wait is logged. If the fourth attempt is also rate limited, the run ends with
+`provider_rate_limit`; the agent and trial are not restarted. The 2A
+connectivity check keeps its shorter four-minute wall cap and does not use
+these waits. Gateway trial-cap 429s are never retried.
 
 The run page appears immediately, including before the controller creates its
 run directory. During execution the controllers mirror decoy logs to
@@ -51,17 +100,32 @@ record is observed. Fixture checks launch no agent, so that timer displays
 `—`. The nearby **Decoy engaged** timer starts from the first decoy request
 for 2A or first virtual filesystem interaction for 2B.
 
-## Current boundary
+## Activity and diagnostics
 
 - The right pane displays exact archived response text after verifying its
   SHA-256. 2A HTTP request/response and canary events appear in order; 2B
   connection, command, and reinforcement events appear in order.
-- The left pane displays PentestGPT's recorded visible commentary, tool calls,
-  tool results, and structured events for archived agent runs. PentestGPT
-  omits private reasoning content, and the UI labels that omission.
-- Selecting an agent action may show nearby server activity, explicitly marked
-  **time-correlated**. Exact 2A/2B tool-to-server interaction IDs are a later
-  slice.
+- **Activity** shows committed PentestGPT task plans and outcomes from the
+  read-only SQLite state, visible commentary, paired tool calls and results,
+  and the final run outcome. **Diagnostics** shows the trace transport records
+  and raw event types. Private reasoning content is omitted by PentestGPT's
+  trace; the UI states this once above the feed.
+- Click a card for full projected content, timestamp, episode and call IDs,
+  and its source location. The **Authoritative raw record** section loads that
+  one archive line or state revision on demand, including content beyond the
+  12,000-character event projection limit.
+- The server timeline pairs a decoy request with its response when their
+  archive sequence and route match. Gateway events remain separate. The final
+  run outcome distinguishes provider rate limiting, trial model caps, and
+  agent errors when the archived evidence supports that distinction.
+- Selecting a target-capable tool call shows decoy events observed during that
+  call and labels them **time-correlated**. Model gateway events stay separate;
+  exact 2A/2B tool-to-decoy interaction IDs are a later slice. Repeated
+  omitted-thinking markers are hidden from the agent feed while raw traces
+  remain archived.
+- A nonzero natural agent exit is shown as a failed run, including for older
+  archives whose job journal incorrectly said complete. The original archive
+  files remain untouched.
 - The local dashboard does not alter trial prompts, treatments, or caps.
 
 Run the checks from the repository root with:

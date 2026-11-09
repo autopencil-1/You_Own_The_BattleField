@@ -10,7 +10,7 @@ import sys
 import threading
 from typing import Any
 
-from .core import RunRequest, JOBS, RUNS, job_status, private_json, utc_now
+from .core import LAB, RunRequest, JOBS, RUNS, job_status, private_json, read_json, utc_now
 
 
 _launch_lock = threading.Lock()
@@ -51,24 +51,27 @@ def launch_run(request: RunRequest) -> dict[str, Any]:
             raise RuntimeError(f"Another dashboard run is active: {active}")
         if request.mode != "deterministic":
             from experiment_controller.run_2a import read_key
-            read_key()
+            read_key(request.provider)
         prefix = ("2a" if request.experiment == "2A" else "2b") + "-" + request.mode[:4]
         run_id = f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"
         folder = JOBS / run_id
         folder.mkdir(parents=True, mode=0o700)
         private_json(folder / "request.json", request.model_dump())
+        task_file = LAB / "config" / ("agent_2a_task.json" if request.experiment == "2A" else "agent_2b_task.json")
+        task_caps = (read_json(task_file) or {}).get("caps_per_trial") or {}
         private_json(folder / "status.json", {
             "run_id": run_id, "experiment": request.experiment, "mode": request.mode,
-            "arm": request.arm, "status": "queued", "created_utc": utc_now(),
-            "max_wall_seconds": (240 if request.mode == "connectivity" else
-                                 1200 if request.mode == "pilot" else None),
+            "arm": request.arm, "provider": request.provider if request.mode != "deterministic" else None,
+            "decoy_protocol": "session-v2" if request.experiment == "2A" else None,
+            "status": "queued", "created_utc": utc_now(),
+            "max_wall_seconds": task_caps.get("wall_seconds") if request.mode != "deterministic" else None,
             "pid": None, "error": None,
         })
         descriptor = os.open(folder / "worker.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as log:
             env = {key: value for key, value in os.environ.items()
                    if not key.startswith(("SHAPE_", "COMPOSE_", "ANTHROPIC_"))
-                   and key not in {"ZAI_API_KEY", "DOCKER_HOST", "DOCKER_CONTEXT"}}
+                   and key not in {"ZAI_API_KEY", "OLLAMA_API_KEY", "DOCKER_HOST", "DOCKER_CONTEXT"}}
             try:
                 subprocess.Popen([sys.executable, "-m", "dashboard.worker", run_id],
                                  cwd=RUNS.parent, env=env, stdin=subprocess.DEVNULL,

@@ -19,13 +19,17 @@ def verify_run(run_dir: Path) -> dict:
     if stored_manifest != manifest:
         raise ValueError("Stored manifest and result manifest differ")
     recorded_score = recorded["score"]
+    protocol = manifest.get("decoy_protocol")
     replayed = score_events(
         load_events(run_dir / "decoy-events.jsonl"),
         run_id, manifest["arm"],
         require_condition_delivery="condition_response_delivered" in recorded_score,
+        protocol=protocol,
     )
     exact = replayed == recorded_score
     legacy_fields_match = (
+        protocol is None
+        and
         set(replayed) == set(recorded_score) | {"condition_response_delivered"}
         and replayed["condition_response_delivered"] is False
         and all(replayed[key] == value for key, value in recorded_score.items())
@@ -35,6 +39,7 @@ def verify_run(run_dir: Path) -> dict:
     return {
         "run_id": run_id,
         "arm": manifest["arm"],
+        "decoy_protocol": protocol or "text-only",
         "score_reproduced": True,
         "exact_current_schema": exact,
         "activated": replayed["activated"],

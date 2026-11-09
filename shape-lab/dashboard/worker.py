@@ -7,7 +7,7 @@ import os
 import sys
 import traceback
 
-from .core import RunRequest, JOBS, job_status, private_json, utc_now
+from .core import RunRequest, JOBS, archive_error, job_status, private_json, utc_now
 
 
 def main(run_id: str) -> int:
@@ -30,7 +30,8 @@ def main(run_id: str) -> int:
         try:
             if request.experiment == "2A":
                 from experiment_controller.run_2a import run
-                result = run(request.mode, request.arm, build=request.build, run_id=run_id)
+                result = run(request.mode, request.arm, build=request.build, run_id=run_id,
+                             provider=request.provider)
             else:
                 if request.mode == "deterministic":
                     from experiment_controller.run_2b import run_deterministic
@@ -38,9 +39,10 @@ def main(run_id: str) -> int:
                                                branching_factor=request.branching_factor, run_id=run_id)
                 else:
                     from experiment_controller.run_2b import run_connectivity
-                    result = run_connectivity(build=request.build, seed=request.seed, run_id=run_id)
+                    result = run_connectivity(build=request.build, seed=request.seed, run_id=run_id,
+                                              provider=request.provider)
             manifest = result["manifest"]
-            error = manifest.get("error")
+            error = archive_error(manifest)
             if request.experiment == "2A" and "scoring_error" in result.get("score", {}):
                 error = result["score"]["scoring_error"]
             status.update({"status": "failed" if error else "complete",

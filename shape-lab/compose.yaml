@@ -8,6 +8,7 @@ services:
     environment:
       SHAPE_ARM: ${SHAPE_ARM:-C2}
       SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2a-dev}
+      SHAPE_DECOY_PROTOCOL: ${SHAPE_DECOY_PROTOCOL:-session-v2}
     expose:
       - "8080"
     networks:
@@ -34,14 +35,16 @@ services:
     user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
     environment:
       SHAPE_RUN_ID: ${SHAPE_RUN_ID:-2a-dev}
-      SHAPE_MODEL: glm-5.3-flash
+      SHAPE_MODEL: ${SHAPE_MODEL:-glm-5.3}
+      SHAPE_MODEL_PROVIDER: ${SHAPE_MODEL_PROVIDER:-ollama}
       SHAPE_MAX_MODEL_CALLS: ${SHAPE_MAX_MODEL_CALLS:-60}
-      SHAPE_MAX_MODEL_TOKENS: ${SHAPE_MAX_MODEL_TOKENS:-200000}
-      SHAPE_KEY_FILE: /run/secrets/zai_api_key
+      SHAPE_MAX_MODEL_TOKENS: ${SHAPE_MAX_MODEL_TOKENS:-100000000}
+      SHAPE_PROVIDER_429_RETRY_DELAYS: ${SHAPE_PROVIDER_429_RETRY_DELAYS:-}
+      SHAPE_KEY_FILE: /run/secrets/model_api_key
     volumes:
       - type: bind
         source: ${SHAPE_KEY_FILE:-/tmp/shape2a-dev-key}
-        target: /run/secrets/zai_api_key
+        target: /run/secrets/model_api_key
         read_only: true
     expose: ["8081"]
     networks: [trial_net, egress_net]
@@ -70,17 +73,17 @@ services:
       SHAPE_SMOKE: ${SHAPE_SMOKE:-0}
       ANTHROPIC_BASE_URL: http://model-gateway:8081
       ANTHROPIC_AUTH_TOKEN: shape-lab-placeholder
-      ANTHROPIC_CUSTOM_MODEL_OPTION: glm-5.3-flash
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: glm-5.3-flash
-      ANTHROPIC_DEFAULT_SONNET_MODEL: glm-5.3-flash
-      ANTHROPIC_DEFAULT_OPUS_MODEL: glm-5.3-flash
+      ANTHROPIC_CUSTOM_MODEL_OPTION: ${SHAPE_MODEL:-glm-5.3}
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: ${SHAPE_MODEL:-glm-5.3}
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${SHAPE_MODEL:-glm-5.3}
+      ANTHROPIC_DEFAULT_OPUS_MODEL: ${SHAPE_MODEL:-glm-5.3}
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
       CLAUDE_CODE_MAX_RETRIES: "0"
       DISABLE_AUTOUPDATER: "1"
       DISABLE_TELEMETRY: "1"
       DISABLE_ERROR_REPORTING: "1"
-      API_TIMEOUT_MS: "180000"
+      API_TIMEOUT_MS: ${SHAPE_AGENT_API_TIMEOUT_MS:-180000}
     volumes:
       - type: bind
         source: ${SHAPE_RUN_DIR:-/tmp/shape2a-dev}/agent

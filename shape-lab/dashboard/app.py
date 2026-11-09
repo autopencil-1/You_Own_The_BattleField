@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import secrets
 
@@ -10,13 +11,21 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from .core import (RunRequest, JOBS, UI_DIST, capabilities, collector,
-                   job_status, list_runs, provisional_snapshot, run_path, run_snapshot)
+                   job_status, list_runs, provisional_snapshot, raw_event_record,
+                   run_path, run_snapshot)
 from .jobs import launch_run
 
 
 app = FastAPI(title="SHAPE experiment console", docs_url=None, redoc_url=None)
+launch_log = logging.getLogger("uvicorn.error")
+
+
+class LaunchEnvelope(BaseModel):
+    run: RunRequest
+    launch_token: str
 
 
 def _session_token() -> str:
@@ -32,16 +41,35 @@ def _session_token() -> str:
     return token
 
 
+LOCAL_HOSTS = {"127.0.0.1:8787", "localhost:8787", "127.0.0.1:5173", "localhost:5173", "testserver"}
+
+
+def _trusted_launch_origin(host: str, origin: str | None) -> bool:
+    return host in LOCAL_HOSTS and origin in {
+        f"http://{host}", "http://127.0.0.1:5173", "http://localhost:5173",
+    }
+
+
 def _guard_launch(request: Request, token: str | None) -> None:
-    host = request.headers.get("host", "")
-    allowed_hosts = {"127.0.0.1:8787", "localhost:8787", "127.0.0.1:5173", "localhost:5173", "testserver"}
-    if host not in allowed_hosts or request.client is None or request.client.host not in {"127.0.0.1", "::1", "testclient"}:
-        raise HTTPException(403, "Local console only")
-    origin = request.headers.get("origin")
-    if origin not in {f"http://{host}", "http://127.0.0.1:5173", "http://localhost:5173"}:
-        raise HTTPException(403, "Same-origin launch required")
+    def reject(detail: str) -> None:
+        launch_log.warning(
+            "Launch rejected: %s; host=%r origin=%r peer=%r forwarded_for=%s "
+            "forwarded_host=%r forwarded_proto=%r fetch_site=%r token_present=%s",
+            detail, request.headers.get("host"), request.headers.get("origin"),
+            request.client.host if request.client else None,
+            "x-forwarded-for" in request.headers,
+            request.headers.get("x-forwarded-host"),
+            request.headers.get("x-forwarded-proto"),
+            request.headers.get("sec-fetch-site"), bool(token),
+        )
+        raise HTTPException(403, detail)
+
+    if request.client is None or request.client.host not in {"127.0.0.1", "::1", "testclient"}:
+        reject("Local console only")
+    if not _trusted_launch_origin(request.headers.get("host", ""), request.headers.get("origin")):
+        reject("Same-origin launch required")
     if not token or not secrets.compare_digest(token, _session_token()):
-        raise HTTPException(403, "Invalid launch token")
+        reject("Invalid launch token")
 
 
 @app.get("/api/session")
@@ -63,11 +91,13 @@ async def runs(limit: int = 80) -> dict:
 
 
 @app.post("/api/runs", status_code=202)
-async def start_run(request: Request, payload: RunRequest,
+async def start_run(request: Request, payload: LaunchEnvelope | RunRequest,
                     x_shape_launch_token: str | None = Header(default=None)) -> dict:
-    _guard_launch(request, x_shape_launch_token)
+    run = payload.run if isinstance(payload, LaunchEnvelope) else payload
+    token = payload.launch_token if isinstance(payload, LaunchEnvelope) else x_shape_launch_token
+    _guard_launch(request, token)
     try:
-        return launch_run(payload)
+        return launch_run(run)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     except (FileNotFoundError, ValueError) as exc:
@@ -109,6 +139,14 @@ async def events(run_id: str, after: int = 0, limit: int = 200) -> dict:
     selected = [row for row in rows if row["event_id"] > after][:limit]
     return {"events": selected, "latest_event_id": len(rows),
             "has_more": bool(selected and selected[-1]["event_id"] < len(rows))}
+
+
+@app.get("/api/runs/{run_id}/events/{event_id}/raw")
+async def raw_event(run_id: str, event_id: int) -> dict:
+    try:
+        return raw_event_record(run_id, event_id)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(404, "Raw event unavailable") from exc
 
 
 def _checked_run(run_id: str) -> str:

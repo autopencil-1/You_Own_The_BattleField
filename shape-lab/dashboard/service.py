@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 import signal
@@ -67,7 +66,8 @@ def start() -> int:
     with os.fdopen(descriptor, "wb") as log:
         process = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "dashboard.app:app", "--host", "127.0.0.1",
-             "--port", str(PORT), "--no-access-log"],
+             "--port", str(PORT), "--no-proxy-headers", "--no-access-log",
+             "--timeout-graceful-shutdown", "3"],
             cwd=LAB, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -96,14 +96,31 @@ def stop() -> int:
         PID_FILE.unlink(missing_ok=True)
         print("Dashboard is not running under make up")
         return 0
-    os.kill(pid, signal.SIGTERM)
-    for _ in range(30):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    for _ in range(50):
         if _owned_process(state) is None:
             PID_FILE.unlink(missing_ok=True)
             print("Dashboard stopped")
             return 0
-        time.sleep(0.2)
-    print("Dashboard did not stop within six seconds", file=sys.stderr)
+        time.sleep(0.1)
+    # The dashboard owns no trial containers or workers. A stuck SSE client
+    # must not make `make down` leave this managed UI process behind.
+    pid = _owned_process(state)
+    if pid is not None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    for _ in range(20):
+        if _owned_process(state) is None:
+            PID_FILE.unlink(missing_ok=True)
+            print("Dashboard stopped after forcing a stalled connection closed")
+            return 0
+        time.sleep(0.1)
+    print("Dashboard process remains after forced stop", file=sys.stderr)
     return 1
 
 

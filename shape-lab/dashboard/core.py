@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import base64
+from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import threading
 from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -61,6 +64,7 @@ class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     experiment: str
+    provider: Literal["zai", "ollama"] = "ollama"
     mode: str = "deterministic"
     arm: str
     build: bool = False
@@ -71,7 +75,7 @@ class RunRequest(BaseModel):
     def validate_run(self) -> "RunRequest":
         if self.experiment not in ARMS or self.arm not in ARMS[self.experiment]:
             raise ValueError("Experiment and arm do not match")
-        allowed = {"2A": {"deterministic", "connectivity", "pilot"},
+        allowed = {"2A": {"deterministic", "connectivity", "engineering", "pilot"},
                    "2B": {"deterministic", "connectivity"}}
         if self.mode not in allowed[self.experiment]:
             raise ValueError("Mode is unavailable for this experiment")
@@ -88,8 +92,10 @@ class RunRequest(BaseModel):
         return self
 
 
-def key_configured() -> bool:
-    """Report only whether the root .env contains a nonempty Z.AI key."""
+def key_configured(provider: str = "ollama") -> bool:
+    """Report only whether the root .env contains the selected provider key."""
+    from model_gateway.providers import provider_spec
+    key_name = provider_spec(provider)["key_name"]
     path = LAB.parent / ".env"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -97,7 +103,7 @@ def key_configured() -> bool:
         return False
     for line in lines:
         name, separator, value = line.removeprefix("export ").partition("=")
-        if separator and name.strip() == "ZAI_API_KEY":
+        if separator and name.strip() == key_name:
             return bool(value.strip().strip("\"'"))
     return False
 
@@ -109,14 +115,18 @@ def capabilities() -> dict[str, Any]:
         "schema_version": 1,
         "experiments": [
             {"id": "2A", "name": "OBEY", "arms": list(ARMS["2A"]),
-             "launch_modes": ["deterministic", "connectivity", "pilot"],
+             "launch_modes": ["deterministic", "connectivity", "engineering", "pilot"],
+             "decoy_protocol": "session-v2",
              "agent": agent_2a.get("agent"), "pilot_caps": agent_2a.get("caps_per_trial")},
             {"id": "2B", "name": "EXPLORE", "arms": list(ARMS["2B"]),
              "launch_modes": ["deterministic", "connectivity"],
-             "agent": agent_2b.get("agent"), "fixture_caps": {"wall_seconds": 240, "max_agent_tool_calls": 20,
-                                                                  "max_model_calls": 8, "max_model_tokens_input_plus_output": 100000}},
+             "agent": agent_2b.get("agent"), "fixture_caps": {
+                 "wall_seconds": (agent_2b.get("caps_per_trial") or {}).get("wall_seconds"), "max_agent_tool_calls": 20, "max_model_calls": 8,
+                 "max_model_tokens_input_plus_output": (agent_2b.get("caps_per_trial") or {}).get("max_model_tokens_input_plus_output"),
+             }},
         ],
         "credential_configured": key_configured(),
+        "provider_credentials": {name: key_configured(name) for name in ("zai", "ollama")},
         "agent_settings_source": "config/agent_2a_task.json and config/agent_2b_task.json",
     }
 
@@ -131,6 +141,23 @@ def job_status(run_id: str) -> dict[str, Any] | None:
     return read_json(job_path(run_id))
 
 
+def archive_error(manifest: dict[str, Any]) -> str | None:
+    error = manifest.get("error")
+    if isinstance(error, str) and error:
+        return error
+    code = manifest.get("agent_exit_code")
+    if manifest.get("termination_reason") == "agent_exit" and isinstance(code, int) and code != 0:
+        return f"Attacker agent exited with code {code}"
+    return None
+
+
+def archived_provider(manifest: dict[str, Any], job: dict[str, Any]) -> str | None:
+    mode = manifest.get("mode") or job.get("mode")
+    if not mode or str(mode).startswith("deterministic"):
+        return None
+    return manifest.get("provider") or job.get("provider") or "zai"  # Legacy agent archives used Z.AI.
+
+
 def list_runs(limit: int = 80) -> list[dict[str, Any]]:
     RUNS.mkdir(parents=True, exist_ok=True, mode=0o700)
     rows = []
@@ -139,12 +166,15 @@ def list_runs(limit: int = 80) -> list[dict[str, Any]]:
             continue
         manifest = read_json(path / "manifest.json") or {}
         job = job_status(path.name) or {}
+        error = archive_error(manifest) or job.get("error")
         rows.append({
             "run_id": path.name,
             "experiment": "2A" if path.name.startswith("2a-") else "2B",
             "mode": manifest.get("mode") or job.get("mode") or "unknown",
             "arm": manifest.get("arm") or job.get("arm"),
-            "status": job.get("status") or ("complete" if (path / "result.json").exists() else "archived"),
+            "provider": archived_provider(manifest, job),
+            "decoy_protocol": manifest.get("decoy_protocol") or job.get("decoy_protocol") or ("text-only" if path.name.startswith("2a-") else None),
+            "status": "failed" if error else job.get("status") or ("complete" if (path / "result.json").exists() else "archived"),
             "started_utc": manifest.get("started_utc") or job.get("created_utc"),
             "finished_utc": manifest.get("finished_utc"),
             "termination_reason": manifest.get("termination_reason"),
@@ -185,6 +215,29 @@ def _compact(value: object, maximum: int = 12000) -> object:
     return value
 
 
+_SESSION_SECRET_RE = re.compile(r"(?i)\b[0-9a-f]{32}\b")
+_PUBLIC_EPISODE_RE = re.compile(r"trace-[0-9a-f]{20}\Z")
+
+
+def _public_episode_id(name: str) -> str:
+    """Give a trace a stable identifier that cannot match a session secret."""
+    return f"trace-{hashlib.sha256(name.encode('utf-8')).hexdigest()[:20]}"
+
+
+def _redact_session(value: object) -> object:
+    """Keep session-v2 secrets in the private archive, never the monitor API."""
+    if isinstance(value, str):
+        return _SESSION_SECRET_RE.sub("[redacted]", value)
+    if isinstance(value, dict):
+        return {key: _redact_session(item) for key, item in value.items()
+                if key != "body_b64"}
+    if isinstance(value, list):
+        return [_redact_session(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_session(item) for item in value]
+    return value
+
+
 def _project(source: str, row: dict[str, Any], *, episode_id: str | None = None,
              role: str | None = None) -> dict[str, Any]:
     kind = str(row.get("event_type") or row.get("type") or "unknown")
@@ -208,12 +261,93 @@ def _project(source: str, row: dict[str, Any], *, episode_id: str | None = None,
             "role": role, "call_id": row.get("call_id"), "detail": _compact(detail)}
 
 
+def _state_rows(path: Path, run_id: str) -> list[dict[str, Any]]:
+    """Read only committed PentestGPT transitions from the live trial database."""
+    database = path / "agent" / "runs" / run_id / "state.sqlite3"
+    if not database.is_file() or database.is_symlink():
+        return []
+    try:
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0.1)) as connection:
+            connection.row_factory = sqlite3.Row
+            tasks = {row["task_id"]: dict(row) for row in connection.execute(
+                "SELECT task_id, kind, target, objective, done_when FROM tasks WHERE run_id = ?", (run_id,))}
+            transitions = [dict(row) for row in connection.execute(
+                "SELECT revision, kind, task_id, attempt_id, detail, created_at "
+                "FROM transitions WHERE run_id = ? ORDER BY revision", (run_id,))]
+    except sqlite3.Error:
+        return []  # The agent may still be creating its database or committing a transition.
+    projected = []
+    reference = f"agent/runs/{run_id}/state.sqlite3"
+    for row in transitions:
+        try:
+            detail = json.loads(row["detail"])
+        except (TypeError, ValueError):
+            detail = {"unparsed_detail": str(row["detail"])}
+        if not isinstance(detail, dict):
+            detail = {"value": detail}
+        kind = row["kind"]
+        task_id = row["task_id"]
+        selected_task = tasks.get(task_id or detail.get("next_task_id"))
+        projected.append({
+            "source_key": f"state:{row['revision']}",
+            "raw_ref": {"file": reference, "revision": row["revision"]},
+            "source": "agent", "kind": "state_transition",
+            "occurred_utc": datetime.fromtimestamp(row["created_at"], timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "source_sequence": row["revision"], "episode_id": None,
+            "role": "supervisor" if kind == "plan_committed" else "executor" if kind.startswith("attempt_") else None,
+            "call_id": None,
+            "detail": _compact({"transition": kind, "revision": row["revision"],
+                                "task_id": task_id, "attempt_id": row["attempt_id"],
+                                "task": selected_task, **detail}),
+        })
+    return projected
+
+
+def _outcome_detail(manifest: dict[str, Any], events: list[dict[str, Any]],
+                    summary: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Explain the observed termination while retaining the controller's raw reason."""
+    reason = manifest.get("termination_reason")
+    code = manifest.get("agent_exit_code")
+    gateway = [item for item in events if item.get("source") == "gateway"]
+    cap = next((item.get("detail", {}) for item in reversed(gateway) if item.get("kind") == "cap_reached"), None)
+    provider_limit = any(item.get("kind") in {"provider_rate_limit_rejected", "provider_rate_limit_exhausted"}
+                         for item in gateway)
+    cap_rejection = any(item.get("source") == "agent" and item.get("kind") in {"assistant_text", "turn_completed"}
+                        and "trial_cap_reached" in json.dumps(item.get("detail", {})) for item in events)
+    cause = reason or "unknown"
+    label = str(reason or "Unknown termination").replace("_", " ")
+    if reason == "provider_rate_limit" or provider_limit and code not in (None, 0):
+        cause, label = "provider_rate_limit", "Provider rate limit"
+    elif cap and (reason == "model_cap" or reason == "agent_exit" and isinstance(code, int) and code != 0 and cap_rejection):
+        tokens, token_limit = cap.get("tokens"), manifest.get("max_model_tokens")
+        calls, call_limit = cap.get("calls"), manifest.get("max_model_calls")
+        if cap.get("usage_missing"):
+            cause, label = "model_usage_missing", "Model usage missing at trial cap"
+        elif isinstance(tokens, int) and isinstance(token_limit, int) and tokens >= token_limit:
+            cause, label = "model_token_cap", f"Model token cap reached ({tokens:,}/{token_limit:,})"
+        elif isinstance(calls, int) and isinstance(call_limit, int) and calls >= call_limit:
+            cause, label = "model_call_cap", f"Model call cap reached ({calls}/{call_limit})"
+        else:
+            cause, label = "model_cap", "Model trial cap reached"
+    elif reason == "agent_exit" and isinstance(code, int) and code != 0:
+        agent_error = (summary or {}).get("error")
+        if isinstance(agent_error, str) and agent_error.startswith("supervisor_contract:") and "without TurnCompleted" in agent_error:
+            cause, label = "supervisor_stream_incomplete", "Supervisor stream ended without a terminal event"
+        else:
+            cause, label = "agent_error", f"Agent exited with code {code}"
+    return {"cause": cause, "label": label, "termination_reason": reason,
+            "agent_exit_code": code, "controller_error": manifest.get("error"),
+            "cap": cap, "tasks": (summary or {}).get("tasks", []),
+            "agent_status": (summary or {}).get("status")}
+
+
 class Collector:
     def __init__(self) -> None:
         self.lock = threading.RLock()
 
     def collect(self, run_id: str) -> list[dict[str, Any]]:
         path = run_path(run_id)
+        session_v2 = (read_json(path / "manifest.json") or {}).get("decoy_protocol") == "session-v2"
         index = path / "monitor-events.jsonl"
         with self.lock:
             existing = [row for _, row in _jsonl(index) if "event_id" in row]
@@ -236,18 +370,27 @@ class Collector:
             traces = path / "agent" / "runs" / run_id / "traces"
             if traces.is_dir():
                 for episode in sorted(traces.iterdir()):
-                    if not episode.is_dir():
+                    if not episode.is_dir() or episode.is_symlink():
                         continue
                     role = (read_json(episode / "input.json") or {}).get("role")
+                    episode_id = _public_episode_id(episode.name) if session_v2 else episode.name
                     for line, row in _jsonl(episode / "events.jsonl"):
+                        if row.get("type") == "raw_event" and row.get("kind") == "system:thinking_tokens":
+                            continue  # Repeated omitted-token notices add no observable agent action.
                         sequence = row.get("sequence")
-                        key = f"agent:{episode.name}:{sequence}" if isinstance(sequence, int) else f"agent:{episode.name}:{line}"
+                        key = f"agent:{episode_id}:{sequence}" if isinstance(sequence, int) else f"agent:{episode_id}:{line}"
                         if key in seen:
                             continue
                         seen.add(key)
                         fresh.append({"source_key": key,
-                                      "raw_ref": {"file": f"agent/runs/{run_id}/traces/{episode.name}/events.jsonl", "line": line},
-                                      **_project("agent", row, episode_id=episode.name, role=role)})
+                                      "raw_ref": {"file": f"agent/runs/{run_id}/traces/{episode_id}/events.jsonl", "line": line},
+                                      **_project("agent", row, episode_id=episode_id, role=role)})
+
+            for item in _state_rows(path, run_id):
+                if item["source_key"] in seen:
+                    continue
+                seen.add(item["source_key"])
+                fresh.append(item)
 
             for filename in ("agent-live.log", "agent-stdout.log"):
                 try:
@@ -272,11 +415,24 @@ class Collector:
                                   "episode_id": None, "role": None, "call_id": None,
                                   "detail": {"message": "Agent process started"}})
 
+            manifest = read_json(path / "manifest.json") or {}
+            finished = manifest.get("finished_utc")
+            if isinstance(finished, str) and "controller:outcome" not in seen:
+                summary = read_json(path / "agent" / "runs" / run_id / "summary.json")
+                fresh.append({"source_key": "controller:outcome", "raw_ref": {"file": "manifest.json"},
+                              "source": "controller", "kind": "run_outcome",
+                              "occurred_utc": finished, "source_sequence": None,
+                              "episode_id": None, "role": None, "call_id": None,
+                              "detail": _compact(_outcome_detail(manifest, existing + fresh, summary))})
+                seen.add("controller:outcome")
+
             if fresh:
                 fresh.sort(key=lambda item: (item["occurred_utc"], item["source_key"]))
                 descriptor = os.open(index, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
                 with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                     for item in fresh:
+                        if session_v2:
+                            item = _redact_session(item)
                         item["event_id"] = len(existing) + 1
                         item["run_id"] = run_id
                         item["experiment"] = "2A" if run_id.startswith("2a-") else "2B"
@@ -291,22 +447,125 @@ class Collector:
 collector = Collector()
 
 
+def raw_event_record(run_id: str, event_id: int) -> dict[str, Any]:
+    """Fetch one authoritative source record without exposing arbitrary run files."""
+    if event_id < 1:
+        raise FileNotFoundError(event_id)
+    path = run_path(run_id)
+    session_v2 = (read_json(path / "manifest.json") or {}).get("decoy_protocol") == "session-v2"
+
+    def visible(record: dict[str, Any]) -> dict[str, Any]:
+        return _redact_session(record) if session_v2 else record
+
+    event = next((item for item in collector.collect(run_id) if item["event_id"] == event_id), None)
+    reference = event.get("raw_ref") if event else None
+    if not isinstance(reference, dict) or not isinstance(reference.get("file"), str):
+        raise FileNotFoundError(event_id)
+    relative = reference["file"]
+    trace_pattern = rf"agent/runs/{re.escape(run_id)}/traces/[A-Za-z0-9._-]+/events\.jsonl"
+    state_name = f"agent/runs/{run_id}/state.sqlite3"
+    summary_name = f"agent/runs/{run_id}/summary.json"
+    line_files = {"decoy-live.jsonl", "decoy-events.jsonl", "gateway-live.jsonl",
+                  "gateway-events.jsonl", "agent-live.log", "agent-stdout.log"}
+    if Path(relative).is_absolute() or ".." in Path(relative).parts or not (
+        relative in line_files | {"manifest.json", state_name, summary_name}
+        or re.fullmatch(trace_pattern, relative)
+    ):
+        raise FileNotFoundError(event_id)
+    source = path / relative
+    if session_v2 and re.fullmatch(trace_pattern, relative):
+        public_episode = Path(relative).parent.name
+        if _PUBLIC_EPISODE_RE.fullmatch(public_episode):
+            trace_root = path / "agent" / "runs" / run_id / "traces"
+            matches = [candidate / "events.jsonl" for candidate in trace_root.iterdir()
+                       if candidate.is_dir() and not candidate.is_symlink()
+                       and _public_episode_id(candidate.name) == public_episode] if trace_root.is_dir() else []
+            if len(matches) != 1:
+                raise FileNotFoundError(event_id)
+            source = matches[0]
+    if not source.is_file() or not source.resolve().is_relative_to(path.resolve()) or any(
+        parent.is_symlink() for parent in (source, *source.parents) if parent != path and parent.is_relative_to(path)
+    ):
+        raise FileNotFoundError(event_id)
+    if relative == state_name:
+        revision = reference.get("revision")
+        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+            raise FileNotFoundError(event_id)
+        try:
+            with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True, timeout=0.1)) as connection:
+                connection.row_factory = sqlite3.Row
+                record = connection.execute(
+                    "SELECT revision, kind, task_id, attempt_id, detail, created_at "
+                    "FROM transitions WHERE run_id = ? AND revision = ?", (run_id, revision)).fetchone()
+        except sqlite3.Error as exc:
+            raise FileNotFoundError(event_id) from exc
+        if record is None:
+            raise FileNotFoundError(event_id)
+        result = dict(record)
+        try:
+            result["detail"] = json.loads(result["detail"])
+        except (TypeError, ValueError):
+            pass
+        return visible({"raw_ref": reference, "record": result})
+    if relative in {"manifest.json", summary_name}:
+        record = read_json(source)
+        if record is None:
+            raise FileNotFoundError(event_id)
+        if relative == "manifest.json" and event.get("kind") == "run_outcome":
+            summary_path = path / summary_name
+            if summary_path.is_file() and summary_path.resolve().is_relative_to(path.resolve()) and not any(
+                parent.is_symlink() for parent in (summary_path, *summary_path.parents)
+                if parent != path and parent.is_relative_to(path)
+            ):
+                record = {"manifest": record, "agent_summary": read_json(summary_path)}
+        return visible({"raw_ref": reference, "record": record})
+    line_number = reference.get("line")
+    if not isinstance(line_number, int) or isinstance(line_number, bool) or line_number < 1:
+        raise FileNotFoundError(event_id)
+    try:
+        with source.open(encoding="utf-8", errors="replace") as stream:
+            line = next((text for index, text in enumerate(stream, 1) if index == line_number), None)
+    except OSError as exc:
+        raise FileNotFoundError(event_id) from exc
+    if line is None:
+        raise FileNotFoundError(event_id)
+    try:
+        record = json.loads(line) if source.suffix == ".jsonl" else line.rstrip("\n")
+    except ValueError:
+        record = line.rstrip("\n")
+    return visible({"raw_ref": reference, "record": record})
+
+
 def run_snapshot(run_id: str) -> dict[str, Any]:
     path = run_path(run_id)
     events = collector.collect(run_id)
     manifest = read_json(path / "manifest.json") or {}
     job = job_status(run_id) or {}
+    error = archive_error(manifest) or job.get("error")
+    outcome = next((item["detail"] for item in events if item["kind"] == "run_outcome"), None)
+    agent_summary = read_json(path / "agent" / "runs" / run_id / "summary.json") or {}
+    agent_error = agent_summary.get("error")
+    stream_incomplete = (isinstance(agent_error, str) and
+                         agent_error.startswith("supervisor_contract:") and
+                         "without TurnCompleted" in agent_error)
+    if stream_incomplete and isinstance(error, str) and error.startswith("Attacker agent exited with code "):
+        error = agent_error[:500]
+    if isinstance(error, str) and error.startswith("Attacker agent exited with code ") and outcome and outcome.get("cause") not in {"agent_error", "agent_exit"}:
+        error = outcome.get("label") or error
     agent_started = next((item["occurred_utc"] for item in events if item["kind"] == "agent_started"), None)
     return {
         "run_id": run_id, "experiment": "2A" if run_id.startswith("2a-") else "2B",
         "mode": manifest.get("mode") or job.get("mode"),
         "arm": manifest.get("arm") or job.get("arm"),
-        "status": job.get("status") or ("complete" if (path / "result.json").exists() else "archived"),
+        "provider": archived_provider(manifest, job),
+        "decoy_protocol": manifest.get("decoy_protocol") or job.get("decoy_protocol") or ("text-only" if run_id.startswith("2a-") else None),
+        "status": "failed" if error else job.get("status") or ("complete" if (path / "result.json").exists() else "archived"),
         "started_utc": manifest.get("started_utc") or job.get("created_utc"),
         "agent_started_utc": agent_started,
         "finished_utc": manifest.get("finished_utc"),
         "termination_reason": manifest.get("termination_reason"),
-        "error": manifest.get("error") or job.get("error"),
+        "error": _redact_session(error) if manifest.get("decoy_protocol") == "session-v2" else error,
+        "diagnosed_cause": "supervisor_stream_incomplete" if stream_incomplete else outcome.get("cause") if outcome else None,
         "max_wall_seconds": manifest.get("max_wall_seconds") or job.get("max_wall_seconds"),
         "experimental_result": bool(manifest.get("experimental_result", False)),
         "event_count": len(events),
@@ -321,7 +580,8 @@ def provisional_snapshot(run_id: str) -> dict[str, Any] | None:
         return None
     return {
         "run_id": run_id, "experiment": job.get("experiment"),
-        "mode": job.get("mode"), "arm": job.get("arm"),
+        "mode": job.get("mode"), "arm": job.get("arm"), "provider": job.get("provider"),
+        "decoy_protocol": job.get("decoy_protocol"),
         "status": job.get("status"), "started_utc": job.get("created_utc"),
         "agent_started_utc": None, "finished_utc": job.get("finished_utc"),
         "termination_reason": job.get("termination_reason"),

@@ -36,7 +36,7 @@ setup:
 
 images: setup
 	@docker info --format '{{.ServerVersion}}' >/dev/null || { echo 'Docker daemon is unavailable' >&2; exit 1; }
-	@cd "$(LAB)" && "$(VENV)/bin/python" -c 'from experiment_controller.run_2a import read_key; read_key(); print("Z.AI credential configured in repository .env")'
+	@cd "$(LAB)" && "$(VENV)/bin/python" -c 'from dashboard.core import key_configured; assert any(key_configured(name) for name in ("zai", "ollama")), "Set ZAI_API_KEY or OLLAMA_API_KEY in the repository .env"; print("Model provider credential configured in repository .env")'
 	@cd "$(LAB)" && docker compose --profile agent -f compose.yaml build web-decoy-2a model-gateway attacker-agent
 	@cd "$(LAB)" && docker compose --profile agent -f compose_2b.yaml build filesystem-decoy-2b attacker-agent
 

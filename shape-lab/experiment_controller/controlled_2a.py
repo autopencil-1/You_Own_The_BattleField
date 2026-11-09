@@ -16,7 +16,7 @@ import secrets
 from typing import Any
 
 from .run_2a import (
-    AGENT_CONFIG, AGENT_IMAGE, CONFIG, LAB, image_id, pinned_cli_version, run,
+    AGENT_CONFIG, AGENT_IMAGE, CONFIG, DECOY_PROTOCOL, LAB, agent_source_sha256, image_id, pinned_cli_version, run,
     validate_agent_config, validate_sources, write_private,
 )
 
@@ -32,6 +32,8 @@ def digest(path: Path) -> str:
 
 def fingerprint() -> dict[str, Any]:
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
+    if config.get("decoy_protocol") != DECOY_PROTOCOL:
+        raise ValueError("Controlled 2A protocol differs from the trial config")
     validate_agent_config(config)
     pentest_commit, unified_commit = validate_sources()
     images = {
@@ -44,6 +46,8 @@ def fingerprint() -> dict[str, Any]:
     if any(value is None for value in images.values()):
         raise ValueError("Build all three trial images before preparing the cohort")
     return {
+        "provider": "zai",
+        "decoy_protocol": DECOY_PROTOCOL,
         "config_sha256": digest(CONFIG),
         "agent_config_sha256": digest(AGENT_CONFIG),
         "controller_sha256": digest(LAB / "experiment_controller" / "run_2a.py"),
@@ -51,6 +55,7 @@ def fingerprint() -> dict[str, Any]:
         "scorer_sha256": digest(LAB / "telemetry" / "score_2a.py"),
         "images": images,
         "pentestgpt_commit": pentest_commit,
+        "agent_source_sha256": agent_source_sha256(),
         "unified_agent_commit": unified_commit,
         "claude_code_cli_version": pinned_cli_version(),
     }
@@ -63,8 +68,9 @@ def study_dir(study_id: str) -> Path:
 
 
 def pilot_status(images: dict[str, str | None] | None = None) -> dict[str, Any]:
-    if images is None:
-        images = fingerprint()["images"]
+    expected = fingerprint()
+    if images is not None and images != expected["images"]:
+        return {"run_ids": [], "trials": 0, "activated": 0, "stage1_hits": 0, "stage2_hits": 0}
     pilots = []
     for path in (LAB / "runs").glob("*/result.json"):
         try:
@@ -72,9 +78,17 @@ def pilot_status(images: dict[str, str | None] | None = None) -> dict[str, Any]:
         except (OSError, ValueError):
             continue
         manifest = result.get("manifest", {})
-        if manifest.get("mode") != "pilot" or manifest.get("arm") != "C2" or manifest.get("images") != images:
+        if manifest.get("mode") != "pilot" or manifest.get("arm") != "C2" or manifest.get("images") != expected["images"]:
             continue
-        if manifest.get("agent_config_sha256") != digest(AGENT_CONFIG):
+        if manifest.get("decoy_protocol") != DECOY_PROTOCOL or result.get("score", {}).get("schema_version") != 2:
+            continue
+        if manifest.get("provider", "zai") != "zai":
+            continue
+        if any(manifest.get(key) != expected[key] for key in (
+            "config_sha256", "agent_config_sha256", "controller_sha256",
+            "scorer_sha256", "pentestgpt_commit", "agent_source_sha256",
+            "unified_agent_commit", "claude_code_cli_version",
+        )):
             continue
         if manifest.get("error") or "scoring_error" in result.get("score", {}):
             continue
@@ -158,6 +172,8 @@ def assigned_results(study_id: str) -> dict[int, list[dict[str, Any]]]:
 
 def invalid_reason(result: dict[str, Any]) -> str | None:
     manifest = result["manifest"]
+    if manifest.get("termination_reason") == "provider_rate_limit":
+        return "provider_rate_limit"
     if manifest.get("termination_reason") == "controller_error":
         return "controller_error"
     if "scoring_error" in result.get("score", {}):
@@ -192,11 +208,14 @@ def execute(study_id: str, *, max_new_blocks: int | None = None) -> dict[str, in
                     raise RuntimeError(f"Slot {slot} exhausted its predeclared infrastructure replacements")
                 while True:
                     assignment = {"study_id": study_id, **item}
-                    result = run("controlled", item["arm"], build=False, assignment=assignment)
+                    result = run("controlled", item["arm"], build=False, assignment=assignment,
+                                 provider="zai")
                     reason = invalid_reason(result)
                     if reason is None:
                         break
                     attempts.append(result)
+                    if reason == "provider_rate_limit":
+                        raise RuntimeError("Provider rate limit exhausted; resume this schedule after capacity recovers")
                     if len(attempts) > schedule["max_invalid_replacements_per_slot"]:
                         raise RuntimeError(f"Slot {slot} exhausted replacements: {reason}")
             new_blocks += 1
