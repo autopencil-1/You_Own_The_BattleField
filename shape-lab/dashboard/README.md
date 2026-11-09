@@ -2,7 +2,8 @@
 
 This local UI has an index page for 2A and 2B, archived-run viewing, live
 agent and decoy events, and allowlisted launch controls. It offers 2A C2 pilot,
-2A connectivity, the next frozen 2B path-story pilot assignment, 2B B0
+2A connectivity, the frozen 2B path-story pilot and its separate diagnostic
+continuation, 2B B0
 connectivity, and model-free deterministic checks.
 The 2B connectivity run uses the integrated schema-v2 `ledger-prod-01`
 engineering fixture and remains separate from experiment evidence. The frozen
@@ -16,6 +17,16 @@ event journals appear after the run finishes; generated paths are paged from
 the hash-checked materialization inventory. A provider rate limit is shown as
 an infrastructure-invalid attempt. Completion alone does not establish pilot
 slot validity; the pilot controller remains the eligibility authority.
+
+The versioned 2B diagnostic continuation resumes at the parent's next B3
+assignment using the same task, fixture, images, seed, and trial caps. It
+waives the parent's five-hour pause between attempts after a provider 429.
+Each dashboard click starts at most one attempt. A 429 still ends that attempt
+as infrastructure-invalid; there are no automatic in-run 429 retries. Its
+results never fill original v5 slots. The diagnostic controller includes
+parent and diagnostic usage in the same local credit-share admission check.
+After the diagnostic schedule is prepared, the original v5 dashboard launch
+is disabled to keep that accounting separate.
 
 ## Start
 
@@ -56,6 +67,16 @@ For 2B, the home card shows the current frozen pilot's valid-slot count, next
 slot, admission state, and any rate-limit pause. **Run next pilot trial** starts
 one controller-selected assignment when admission is open; the dashboard then
 opens its run page when the controller creates the run ID. The separate
+**B3 diagnostic continuation** panel starts one assignment from its own
+hash-committed schedule. Its run page marks the attempt as excluded from v5.
+The **Stop diagnostic run** button appears only during an admitted active
+diagnostic attempt. It verifies the exact attacker container, records the
+operator request outside the run archive, and stops that container. The
+controller then observes agent exit, settles provider usage, tears down Docker,
+and archives the attempt. A stopped attempt is infrastructure-invalid and may
+remain visible as **stopping** while those steps finish. Stop does not kill the
+controller worker or guarantee an immediate end to billing or finalization.
+The separate
 **Engineering checks** action opens the B0 connectivity and model-free fixture
 settings. Those checks can reuse existing images or rebuild after source edits,
 and deterministic checks accept a fixture seed and branching factor. The 2A

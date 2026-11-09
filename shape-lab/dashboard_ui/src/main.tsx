@@ -61,6 +61,8 @@ type Snapshot = {
   provider_credits_estimated?: string | null
   provider_settlement_state?: string | null
   progress?: PathStoryProgress | null
+  diagnostic_stop_requested?: boolean
+  diagnostic_stop_retry_available?: boolean
 }
 type PathStoryProgress = {
   phase?: string | null
@@ -92,6 +94,18 @@ type PathStoryPilotStatus = {
   credits?: { rate_limit_pause_until_utc?: string | null; remaining_total?: string | null } | null
 }
 type PilotJob = { job_id?: string; status: string; run_id?: string | null; error?: string | null }
+type DiagnosticStatus = {
+  pilot_id?: string
+  phase: string
+  valid_runs?: number
+  scheduled_runs?: number
+  invalid_attempts?: Array<unknown>
+  next_slot?: number | null
+  pending_run?: { run_id: string; stop_requested?: boolean; stop_retry_available?: boolean } | null
+  credits?: { remaining_total?: string | null; rate_limit_pause_until_utc?: string | null } | null
+  launch_available: boolean
+  launch_reason?: string | null
+}
 type FormState = {
   experiment: Experiment
   mode: RunMode
@@ -266,7 +280,7 @@ function mayContactTarget(event: EventRow | null, experiment: Experiment | undef
 }
 
 function statusClass(status: string): string {
-  return `status ${status === 'complete' ? 'ok' : status === 'failed' ? 'bad' : status === 'running' ? 'live' : ''}`
+  return `status ${status === 'complete' ? 'ok' : status === 'failed' || status === 'stopped' ? 'bad' : status === 'running' || status === 'stopping' ? 'live' : ''}`
 }
 
 function chatLaunchRequest(form: FormState): string {
@@ -320,9 +334,22 @@ function App() {
   const [pilotStatusRefresh, setPilotStatusRefresh] = useState(0)
   const [pilotLaunching, setPilotLaunching] = useState(false)
   const [pilotJobId, setPilotJobId] = useState<string | null>(null)
+  const [diagnosticStatus, setDiagnosticStatus] = useState<DiagnosticStatus | null>(null)
+  const [diagnosticStatusLoading, setDiagnosticStatusLoading] = useState(false)
+  const [diagnosticStatusError, setDiagnosticStatusError] = useState<string | null>(null)
+  const [diagnosticActionError, setDiagnosticActionError] = useState<string | null>(null)
+  const [diagnosticStatusRefresh, setDiagnosticStatusRefresh] = useState(0)
+  const [diagnosticLaunching, setDiagnosticLaunching] = useState(false)
+  const [diagnosticJobId, setDiagnosticJobId] = useState<string | null>(null)
+  const [diagnosticStopRunId, setDiagnosticStopRunId] = useState<string | null>(null)
+  const [diagnosticStopLoading, setDiagnosticStopLoading] = useState(false)
+  const [diagnosticStopError, setDiagnosticStopError] = useState<string | null>(null)
   const modalOpen = form !== null
   const pathStory = snapshot?.run_id === runId && snapshot?.experiment === '2B' &&
     (snapshot.mode === 'path_story_pilot' || snapshot.pilot_protocol?.startsWith('2b-path-story') === true)
+  const diagnosticRun = pathStory && snapshot?.pilot_id?.includes('diagnostic-v1') === true
+  const diagnosticStopRequested = diagnosticRun && (snapshot?.diagnostic_stop_requested === true || diagnosticStopRunId === runId)
+  const diagnosticStopRetryAvailable = diagnosticRun && snapshot?.diagnostic_stop_retry_available === true
 
   useEffect(() => {
     if (!modalOpen) return
@@ -346,6 +373,8 @@ function App() {
     setMaterializationAvailable(false)
     setMaterializationVerified(false)
     setMaterializationError(null)
+    setDiagnosticStopRunId(null)
+    setDiagnosticStopError(null)
     setError(null)
   }
 
@@ -356,6 +385,8 @@ function App() {
       setEvents([])
       setSelectedId(null)
       setRawDetails({})
+      setDiagnosticStopRunId(null)
+      setDiagnosticStopError(null)
     }
     window.addEventListener('popstate', onPop)
     const clock = window.setInterval(() => setNow(Date.now()), 500)
@@ -423,6 +454,58 @@ function App() {
     const interval = window.setInterval(refresh, 2000)
     return () => { alive = false; window.clearInterval(interval) }
   }, [pilotJobId, runId])
+
+  useEffect(() => {
+    if (runId) return
+    let alive = true
+    let busy = false
+    async function refresh() {
+      if (busy) return
+      busy = true
+      setDiagnosticStatusLoading(true)
+      try {
+        const state = await getJSON<DiagnosticStatus>('/api/2b/path-story-diagnostic')
+        if (alive) { setDiagnosticStatus(state); setDiagnosticStatusError(null) }
+      } catch (err) {
+        if (alive) { setDiagnosticStatus(null); setDiagnosticStatusError(String(err)) }
+      } finally {
+        busy = false
+        if (alive) setDiagnosticStatusLoading(false)
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(refresh, 25000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [runId, diagnosticStatusRefresh])
+
+  useEffect(() => {
+    if (!diagnosticJobId || runId) return
+    let alive = true
+    let busy = false
+    async function refresh() {
+      if (busy) return
+      busy = true
+      try {
+        const job = await getJSON<PilotJob>(`/api/jobs/${encodeURIComponent(diagnosticJobId as string)}`)
+        if (!alive) return
+        if (job.run_id) {
+          setDiagnosticJobId(null)
+          navigate(job.run_id)
+        } else if (['failed', 'complete', 'not_admitted'].includes(job.status)) {
+          setDiagnosticJobId(null)
+          setDiagnosticActionError(job.error || 'The diagnostic worker ended before admitting a run.')
+          setDiagnosticStatusRefresh(previous => previous + 1)
+        }
+      } catch (err) {
+        if (alive) { setDiagnosticJobId(null); setDiagnosticActionError(String(err)) }
+      } finally {
+        busy = false
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(refresh, 2000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [diagnosticJobId, runId])
 
   useEffect(() => {
     if (!runId) return
@@ -549,7 +632,7 @@ function App() {
     : picked ?? visibleServerEvents.at(-1) ?? null
   const selectedServerItem = serverItems.find(item => item.event.event_id === selected?.event_id || item.response?.event_id === selected?.event_id)
   const agentStarted = snapshot?.agent_started_utc ?? null
-  const agentStop = snapshot?.status === 'complete' || snapshot?.status === 'failed' ? snapshot.finished_utc : null
+  const agentStop = snapshot?.status === 'complete' || snapshot?.status === 'failed' || snapshot?.status === 'stopped' ? snapshot.finished_utc : null
   const entryEvent = events.find(event => snapshot?.experiment === '2A' ? event.kind === 'decoy_request' : event.kind === 'filesystem_interaction')
   const pathProgress = pathStory ? snapshot?.progress : null
   const entryTime = pathStory ? pathProgress?.qualified_entry_utc ?? null : entryEvent?.occurred_utc ?? null
@@ -669,7 +752,7 @@ function App() {
   }
 
   async function launchPathStoryPilot() {
-    if (!pilotStatus?.launch_available || pilotLaunching || pilotJobId) return
+    if (!pilotStatus?.launch_available || pilotLaunching || pilotJobId || diagnosticLaunching || diagnosticJobId) return
     setPilotLaunching(true)
     setPilotActionError(null)
     try {
@@ -691,6 +774,56 @@ function App() {
       setPilotActionError(String(err))
     } finally {
       setPilotLaunching(false)
+    }
+  }
+
+  async function launchDiagnostic() {
+    if (!diagnosticStatus?.launch_available || diagnosticLaunching || diagnosticJobId || pilotLaunching || pilotJobId) return
+    setDiagnosticLaunching(true)
+    setDiagnosticActionError(null)
+    try {
+      const session = await getJSON<{ launch_token: string }>('/api/session')
+      const response = await fetch('/api/2b/path-story-diagnostic/run-next', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ launch_token: session.launch_token }),
+      })
+      if (!response.ok) {
+        const detail = (await response.text()).trim()
+        throw new Error(detail ? `${response.status}: ${detail}` :
+          `${response.status}: Open the dashboard locally at 127.0.0.1:8787 to start the diagnostic.`)
+      }
+      const job = await response.json() as PilotJob
+      if (!job.job_id) throw new Error('The diagnostic launcher returned no dashboard job ID.')
+      setDiagnosticJobId(job.job_id)
+      setDiagnosticStatusRefresh(previous => previous + 1)
+    } catch (err) {
+      setDiagnosticActionError(String(err))
+    } finally {
+      setDiagnosticLaunching(false)
+    }
+  }
+
+  async function stopDiagnostic() {
+    if (!runId || !diagnosticRun || snapshot?.status !== 'running' || diagnosticStopRequested && !diagnosticStopRetryAvailable || diagnosticStopLoading) return
+    setDiagnosticStopLoading(true)
+    setDiagnosticStopError(null)
+    try {
+      const session = await getJSON<{ launch_token: string }>('/api/session')
+      const response = await fetch(`/api/2b/path-story-diagnostic/runs/${encodeURIComponent(runId)}/stop`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ launch_token: session.launch_token }),
+      })
+      if (!response.ok) {
+        const detail = (await response.text()).trim()
+        throw new Error(detail ? `${response.status}: ${detail}` : `${response.status}: Stop request failed.`)
+      }
+      const outcome = await response.json() as { stop_requested?: boolean; state?: string; error?: string | null }
+      setDiagnosticStopRunId(runId)
+      if (outcome.state === 'stop_failed') setDiagnosticStopError(outcome.error || 'Docker could not stop the agent. Retry Stop is available.')
+    } catch (err) {
+      setDiagnosticStopError(String(err))
+    } finally {
+      setDiagnosticStopLoading(false)
     }
   }
 
@@ -730,7 +863,7 @@ function App() {
               {pilotJobId && <span>Starting the next scheduled assignment…</span>}
             </div>
             <div className="pilot-launch-actions">
-              <button className="primary-button" disabled={!pilotStatus?.launch_available || pilotLaunching || Boolean(pilotJobId)} onClick={launchPathStoryPilot}>{pilotLaunching || pilotJobId ? 'Starting trial…' : 'Run next pilot trial'} <span>→</span></button>
+              <button className="primary-button" disabled={!pilotStatus?.launch_available || pilotLaunching || Boolean(pilotJobId) || diagnosticLaunching || Boolean(diagnosticJobId)} onClick={launchPathStoryPilot}>{pilotLaunching || pilotJobId ? 'Starting trial…' : 'Run next pilot trial'} <span>→</span></button>
               <button type="button" className="pilot-secondary" onClick={() => { setForm({ experiment: '2B', mode: 'connectivity', arm: 'B0', provider: 'ollama', seed: 'fixture-seed', branching_factor: 4, build: false }); setError(null) }}>Engineering checks</button>
               <button type="button" className="pilot-refresh" disabled={pilotStatusLoading} onClick={() => setPilotStatusRefresh(previous => previous + 1)}>Refresh status</button>
             </div>
@@ -738,6 +871,34 @@ function App() {
           </div>}
         </article>)}
       </div>
+      <section className="diagnostic-panel" aria-label="B3 diagnostic continuation">
+        <div className="diagnostic-header"><div><p className="eyebrow">SEPARATE 2B SCHEDULE</p><h2>B3 diagnostic continuation</h2><p>Runs here examine the path-story setup under a separate diagnostic schedule. They do not fill the original frozen v5 pilot slots.</p></div><span>MODEL-BACKED · Z.AI</span></div>
+        <div className="diagnostic-body">
+          <div className="diagnostic-facts" aria-live="polite">
+            {diagnosticStatus ? <>
+              <div><span>STATUS</span><strong>{phaseName(diagnosticStatus.phase)}</strong></div>
+              <div><span>DIAGNOSTIC SLOTS</span><strong>{typeof diagnosticStatus.valid_runs === 'number' && typeof diagnosticStatus.scheduled_runs === 'number' ? `${diagnosticStatus.valid_runs}/${diagnosticStatus.scheduled_runs}` : '—'}</strong></div>
+              <div><span>NEXT SLOT</span><strong>{typeof diagnosticStatus.next_slot === 'number' ? diagnosticStatus.next_slot : '—'}</strong></div>
+              <div><span>INVALID ATTEMPTS</span><strong>{diagnosticStatus.invalid_attempts?.length ?? '—'}</strong></div>
+            </> : <p>{diagnosticStatusLoading ? 'Checking diagnostic admission…' : 'Diagnostic status unavailable.'}</p>}
+          </div>
+          <div className="diagnostic-detail">
+            {diagnosticStatus?.pilot_id && <span className="pilot-id">{diagnosticStatus.pilot_id}</span>}
+            {diagnosticStatus?.credits?.remaining_total && <span>Estimated pilot credit share remaining: {diagnosticStatus.credits.remaining_total}</span>}
+            {diagnosticStatus?.phase === 'paused_provider_rate_limit' && diagnosticStatus.credits?.rate_limit_pause_until_utc && <span>Rate-limit pause until {timestamp(diagnosticStatus.credits.rate_limit_pause_until_utc)}</span>}
+            {diagnosticStatus?.pending_run?.stop_requested && <span>{diagnosticStatus.pending_run.stop_retry_available ? 'Stop command failed; open the run and retry.' : 'Stop requested; waiting for settlement and archive finalization.'}</span>}
+            {!diagnosticStatus?.launch_available && diagnosticStatus?.launch_reason && <span className="pilot-launch-reason">{diagnosticStatus.launch_reason}</span>}
+            {diagnosticStatusError && <span className="pilot-launch-reason">{diagnosticStatusError}</span>}
+            {diagnosticActionError && <span className="pilot-launch-reason">{diagnosticActionError}</span>}
+            {diagnosticJobId && <span>Starting the next diagnostic assignment…</span>}
+          </div>
+          <div className="diagnostic-actions">
+            <button className="primary-button" disabled={!diagnosticStatus?.launch_available || diagnosticLaunching || Boolean(diagnosticJobId) || pilotLaunching || Boolean(pilotJobId)} onClick={launchDiagnostic}>{diagnosticLaunching || diagnosticJobId ? 'Starting diagnostic…' : 'Run next diagnostic trial'} <span>→</span></button>
+            <button type="button" className="pilot-refresh" disabled={diagnosticStatusLoading} onClick={() => setDiagnosticStatusRefresh(previous => previous + 1)}>Refresh status</button>
+            {diagnosticStatus?.pending_run?.run_id && <button type="button" className="pilot-pending-link" onClick={() => navigate(diagnosticStatus.pending_run!.run_id)}>View active diagnostic run {diagnosticStatus.pending_run.run_id} ↗</button>}
+          </div>
+        </div>
+      </section>
       <section className="recent-section">
         <div className="section-heading"><div><p className="eyebrow">ARCHIVE</p><h2>Recent runs</h2></div><span>{rows.length} SHOWN</span></div>
         <div className="run-table-wrap"><table><thead><tr><th>RUN</th><th>EXPERIMENT</th><th>MODE</th><th>ARM</th><th>PROVIDER</th><th>STATUS</th><th>STARTED</th><th></th></tr></thead><tbody>
@@ -760,8 +921,8 @@ function App() {
             {pathStory && typeof snapshot?.slot === 'number' && <span>Slot {snapshot.slot}</span>}
             {pathStory && typeof snapshot?.block === 'number' && <span>Block {snapshot.block}</span>}
             <span>{snapshot?.provider?.toUpperCase() || 'MODEL-FREE'}</span>
-            <span>{pathStory ? 'PILOT OBSERVATION' : snapshot?.experimental_result ? 'EXPERIMENTAL' : 'ENGINEERING / FIXTURE'}</span>
-            {pathStory && snapshot?.attempt_classification && <span className={snapshot.attempt_classification === 'infrastructure_invalid' ? 'pilot-invalid' : ''}>{snapshot.attempt_classification.replaceAll('_', ' ')}</span>}
+            <span>{diagnosticRun ? 'DIAGNOSTIC · EXCLUDED FROM V5' : pathStory ? 'PILOT OBSERVATION' : snapshot?.experimental_result ? 'EXPERIMENTAL' : 'ENGINEERING / FIXTURE'}</span>
+            {pathStory && snapshot?.attempt_classification && (!diagnosticRun || snapshot.attempt_classification === 'infrastructure_invalid') && <span className={snapshot.attempt_classification === 'infrastructure_invalid' ? 'pilot-invalid' : ''}>{snapshot.attempt_classification.replaceAll('_', ' ')}</span>}
           </div>
           {pathStory && snapshot?.pilot_id && <p className="pilot-identity">Pilot {snapshot.pilot_id}</p>}
         </div>
@@ -770,7 +931,14 @@ function App() {
       {snapshot?.mode === 'deterministic_fixture' || snapshot?.mode === 'deterministic' ? <div className="fixture-banner">MODEL-FREE FIXTURE CHECK <span>•</span> No autonomous agent is launched in this mode. Server events are live evidence of the check; agent activity is available in archived agent runs.</div> : null}
       {snapshot?.mode === 'connectivity_fixture' || snapshot?.experiment === '2B' && snapshot?.mode === 'connectivity' ? <div className="fixture-banner">2B AGENT CONNECTIVITY CHECK <span>•</span> B0 uses generic fixture content. This is an engineering check, not a B0–B3 treatment result.</div> : null}
       {snapshot?.error && <div className="fixture-banner">RUN ERROR <span>•</span> {snapshot.error}</div>}
-      {pathStory && <div className="fixture-banner">2B PATH-STORY PILOT <span>•</span> This page monitors a frozen pilot attempt. The pilot controller decides whether an attempt counts; this page does not launch or reschedule assignments.</div>}
+      {pathStory && (diagnosticRun ? <div className="fixture-banner diagnostic-banner">2B DIAGNOSTIC CONTINUATION <span>•</span> This run is separate from the original frozen v5 pilot and does not fill its valid slots. A completed run is not a behavioral validity decision.</div> : <div className="fixture-banner">2B PATH-STORY PILOT <span>•</span> This page monitors a frozen pilot attempt. The pilot controller decides whether an attempt counts; this page does not launch or reschedule assignments.</div>)}
+      {diagnosticRun && snapshot?.status === 'running' && <div className="diagnostic-stop-bar">
+        <span>{diagnosticStopRetryAvailable ? 'The scoped Docker stop failed; the agent may still be running.' : diagnosticStopRequested ? 'Stop requested; waiting for provider settlement and archive finalization.' : 'This diagnostic run can be stopped. The controller will settle provider usage and preserve the attempt archive.'}</span>
+        {(!diagnosticStopRequested || diagnosticStopRetryAvailable) && <button type="button" disabled={diagnosticStopLoading} onClick={stopDiagnostic}>{diagnosticStopLoading ? 'Requesting stop…' : diagnosticStopRetryAvailable ? 'Retry Stop' : 'Stop diagnostic run'}</button>}
+        {diagnosticStopError && <span className="pilot-launch-reason">{diagnosticStopError}</span>}
+      </div>}
+      {diagnosticRun && diagnosticStopRequested && snapshot?.status === 'stopping' && <div className="diagnostic-stop-bar">Operator Stop requested; waiting for provider settlement and archive finalization.</div>}
+      {diagnosticRun && diagnosticStopRequested && snapshot?.status === 'stopped' && <div className="fixture-banner pilot-invalid-banner">OPERATOR STOP <span>•</span> This diagnostic attempt is infrastructure-invalid and does not fill a scheduled slot.</div>}
       {pathStory && snapshot?.attempt_classification === 'infrastructure_invalid' && <div className="fixture-banner pilot-invalid-banner">INFRASTRUCTURE-INVALID ATTEMPT <span>•</span> {snapshot.termination_reason === 'provider_rate_limit' ? 'The provider rejected a model request. This is not a decoy outcome.' : 'This attempt does not count as a behavioral pilot outcome.'}</div>}
       {snapshot?.experiment === '2A' && snapshot.status === 'failed' && serverActions === 0 && <div className="fixture-banner">NO TARGET REQUESTS <span>•</span> The web decoy recorded no HTTP requests.{rateLimited ? ' The model gateway recorded HTTP 429.' : ''} Inspect the gateway and agent error events below.</div>}
       {snapshot?.experiment === '2A' && ['pilot', 'engineering'].includes(snapshot.mode || '') && <div className="pilot-stages" aria-label="2A run progress">{pilotStages.map(stage => <div key={stage.label} className={stage.reached ? 'reached' : stage.active && snapshot.status === 'running' ? 'active' : ''}><span>{stage.label}</span><strong>{stage.reached ? 'Observed' : snapshot.status === 'failed' || snapshot.status === 'complete' ? 'Not reached' : stage.active ? 'Planned' : 'Waiting'}</strong></div>)}</div>}

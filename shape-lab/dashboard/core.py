@@ -67,6 +67,22 @@ def _path_story(run_id: str) -> bool:
     return run_id.startswith("2b-path-") and RUN_ID_RE.fullmatch(run_id) is not None
 
 
+def _diagnostic_stop_requested(run_id: str, pilot_id: object) -> bool:
+    if not isinstance(pilot_id, str) or "-diagnostic-v1-" not in pilot_id:
+        return False
+    from .diagnostic_stop_2b import stop_requested
+
+    return stop_requested(run_id, pilot_id)
+
+
+def _diagnostic_stop_retry_available(run_id: str, pilot_id: object) -> bool:
+    if not isinstance(pilot_id, str) or "-diagnostic-v1-" not in pilot_id:
+        return False
+    from .diagnostic_stop_2b import stop_retry_available
+
+    return stop_retry_available(run_id, pilot_id)
+
+
 def monitor_index_path(run_id: str) -> Path:
     """Keep derived UI state outside controller-signed run archives."""
     if RUN_ID_RE.fullmatch(run_id) is None:
@@ -376,6 +392,11 @@ def list_runs(limit: int = 80) -> list[dict[str, Any]]:
         archive_complete = _path_story_archive_complete(path, manifest, result) if path_story else False
         status = _path_story_status(manifest, result, admission, progress, archive_complete) if path_story else (
                       "failed" if error else job.get("status") or ("complete" if (path / "result.json").exists() else "archived"))
+        pilot_id = manifest.get("pilot_id") or admission.get("pilot_id") if path_story else None
+        diagnostic_stop_requested = _diagnostic_stop_requested(path.name, pilot_id) if path_story else False
+        diagnostic_stop_retry_available = _diagnostic_stop_retry_available(path.name, pilot_id) if diagnostic_stop_requested else False
+        if diagnostic_stop_requested:
+            status = "stopped" if manifest and result else "running" if diagnostic_stop_retry_available else "stopping"
         rows.append({
             "run_id": path.name,
             "experiment": "2A" if path.name.startswith("2a-") else "2B",
@@ -388,24 +409,31 @@ def list_runs(limit: int = 80) -> list[dict[str, Any]]:
             "finished_utc": manifest.get("finished_utc"),
             "termination_reason": manifest.get("termination_reason") or (progress or {}).get("selected_reason"),
             "experimental_result": bool(manifest.get("experimental_result", False)),
-            "pilot_id": manifest.get("pilot_id") or admission.get("pilot_id"),
+            "pilot_id": pilot_id,
             "pilot_protocol": manifest.get("pilot_protocol") or admission.get("pilot_protocol"),
             "slot": manifest.get("slot") or admission.get("slot"),
             "block": manifest.get("block") or admission.get("block"),
-            "attempt_classification": _path_story_classification(manifest, result, admission, archive_complete) if path_story else None,
+            "attempt_classification": ("infrastructure_invalid" if diagnostic_stop_requested else
+                                       _path_story_classification(manifest, result, admission, archive_complete)) if path_story else None,
+            "diagnostic_stop_requested": diagnostic_stop_requested,
+            "diagnostic_stop_retry_available": diagnostic_stop_retry_available,
         })
     for run_id, admission in pending.items():
         if run_id in found or (RUNS / run_id).exists():
             continue
+        diagnostic_stop_requested = _diagnostic_stop_requested(run_id, admission.get("pilot_id"))
+        diagnostic_stop_retry_available = _diagnostic_stop_retry_available(run_id, admission.get("pilot_id")) if diagnostic_stop_requested else False
         rows.append({
             "run_id": run_id, "experiment": "2B", "mode": "path_story_pilot",
             "arm": admission.get("arm"), "provider": admission.get("provider"),
-            "decoy_protocol": "filesystem-path-story-v1", "status": "queued",
+            "decoy_protocol": "filesystem-path-story-v1", "status": ("running" if diagnostic_stop_retry_available else "stopping") if diagnostic_stop_requested else "queued",
             "started_utc": admission.get("started_utc"), "finished_utc": None,
             "termination_reason": None, "experimental_result": False,
             "pilot_id": admission.get("pilot_id"), "pilot_protocol": admission.get("pilot_protocol"),
             "slot": admission.get("slot"), "block": admission.get("block"),
-            "attempt_classification": None,
+            "attempt_classification": "infrastructure_invalid" if diagnostic_stop_requested else None,
+            "diagnostic_stop_requested": diagnostic_stop_requested,
+            "diagnostic_stop_retry_available": diagnostic_stop_retry_available,
         })
     rows.sort(key=lambda item: item["started_utc"] or "", reverse=True)
     return rows[:limit]
@@ -812,6 +840,12 @@ def run_snapshot(run_id: str) -> dict[str, Any]:
             error = "Archived evidence is incomplete or differs from its signed manifest"
         classification = _path_story_classification(manifest, result, admission, archive_complete)
         status = _path_story_status(manifest, result, admission, progress, archive_complete)
+        pilot_id = manifest.get("pilot_id") or admission.get("pilot_id")
+        diagnostic_stop_requested = _diagnostic_stop_requested(run_id, pilot_id)
+        diagnostic_stop_retry_available = _diagnostic_stop_retry_available(run_id, pilot_id) if diagnostic_stop_requested else False
+        if diagnostic_stop_requested:
+            classification = "infrastructure_invalid"
+            status = "stopped" if manifest and result else "running" if diagnostic_stop_retry_available else "stopping"
         credits = manifest.get("provider_credits") if isinstance(manifest.get("provider_credits"), dict) else {}
         settlement = manifest.get("provider_settlement") if isinstance(manifest.get("provider_settlement"), dict) else {}
         caps = manifest.get("trial_caps") if isinstance(manifest.get("trial_caps"), dict) else admission.get("trial_caps", {})
@@ -829,11 +863,13 @@ def run_snapshot(run_id: str) -> dict[str, Any]:
             "max_wall_seconds": caps.get("maximum_total_wall_seconds"),
             "experimental_result": bool(manifest.get("experimental_result", False)),
             "event_count": len(events), "score": result.get("score"), "job": {},
-            "pilot_id": manifest.get("pilot_id") or admission.get("pilot_id"),
+            "pilot_id": pilot_id,
             "pilot_protocol": manifest.get("pilot_protocol") or admission.get("pilot_protocol"),
             "slot": manifest.get("slot") or admission.get("slot"),
             "block": manifest.get("block") or admission.get("block"),
             "attempt_classification": classification,
+            "diagnostic_stop_requested": diagnostic_stop_requested,
+            "diagnostic_stop_retry_available": diagnostic_stop_retry_available,
             "provider_credits_estimated": credits.get("estimated_total_credits"),
             "provider_settlement_state": settlement.get("state"),
             "progress": progress,
@@ -916,17 +952,22 @@ def provisional_snapshot(run_id: str) -> dict[str, Any] | None:
         if admission is None:
             return None
         caps = admission.get("trial_caps", {})
+        diagnostic_stop_requested = _diagnostic_stop_requested(run_id, admission.get("pilot_id"))
+        diagnostic_stop_retry_available = _diagnostic_stop_retry_available(run_id, admission.get("pilot_id")) if diagnostic_stop_requested else False
         return {
             "run_id": run_id, "experiment": "2B", "mode": "path_story_pilot",
             "arm": admission.get("arm"), "provider": admission.get("provider"),
-            "decoy_protocol": "filesystem-path-story-v1", "status": "queued",
+            "decoy_protocol": "filesystem-path-story-v1", "status": ("running" if diagnostic_stop_retry_available else "stopping") if diagnostic_stop_requested else "queued",
             "started_utc": admission.get("started_utc"), "agent_started_utc": None,
             "finished_utc": None, "termination_reason": None, "error": None,
             "max_wall_seconds": caps.get("maximum_total_wall_seconds"),
             "experimental_result": False, "event_count": 0, "score": None, "job": {},
             "pilot_id": admission.get("pilot_id"), "pilot_protocol": admission.get("pilot_protocol"),
             "slot": admission.get("slot"), "block": admission.get("block"),
-            "attempt_classification": None, "provider_credits_estimated": None,
+            "attempt_classification": "infrastructure_invalid" if diagnostic_stop_requested else None,
+            "diagnostic_stop_requested": diagnostic_stop_requested,
+            "diagnostic_stop_retry_available": diagnostic_stop_retry_available,
+            "provider_credits_estimated": None,
             "provider_settlement_state": None, "progress": None,
         }
     return {

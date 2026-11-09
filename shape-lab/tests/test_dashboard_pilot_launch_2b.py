@@ -34,6 +34,7 @@ class DashboardPilotLaunchTests(unittest.TestCase):
             "phase": "ready_for_next_run", "credits": {"may_start_new_run": True},
         }
         with patch.object(controller, "status", return_value=controller_status) as status, \
+                patch.object(pilot_2b, "_diagnostic_overlay_active", return_value=False), \
                 patch.object(pilot_2b, "key_configured", return_value=True):
             value = pilot_2b.public_status()
         status.assert_called_once_with(pilot_2b.PILOT_ID)
@@ -63,6 +64,7 @@ class DashboardPilotLaunchTests(unittest.TestCase):
                        "launch_available": True, "schedule_sha256": "b" * 64, "next_slot": 3}
             with patch.object(pilot_2b, "JOBS", jobs_dir), \
                     patch.object(pilot_2b, "RUNS", runs), \
+                    patch.object(pilot_2b, "_diagnostic_overlay_active", return_value=False), \
                     patch.object(jobs, "JOBS", jobs_dir), \
                     patch.object(jobs, "_active_job", return_value=None), \
                     patch("experiment_controller.run_2a.read_key", return_value="dummy"), \
@@ -78,24 +80,39 @@ class DashboardPilotLaunchTests(unittest.TestCase):
             spawn.assert_called_once()
             self.assertIn("dashboard.pilot_2b_worker", spawn.call_args.args[0])
 
+    def test_diagnostic_overlay_disables_original_v5_launch(self) -> None:
+        current = {"pilot_id": pilot_2b.PILOT_ID, "phase": "ready_for_next_run",
+                   "launch_available": True, "schedule_sha256": "b" * 64, "next_slot": 3}
+        with patch.object(pilot_2b, "_diagnostic_overlay_active", return_value=True), \
+                patch.object(pilot_2b.subprocess, "Popen") as spawn:
+            with self.assertRaisesRegex(RuntimeError, "separate diagnostic continuation"):
+                pilot_2b.launch_next(current)
+        spawn.assert_not_called()
+
     def test_api_guard_and_integrity_state(self) -> None:
+        async def run_inline(function, *args):
+            return function(*args)
+
         payload = app.PilotLaunchEnvelope(launch_token="test-token")
         ready = {"pilot_id": pilot_2b.PILOT_ID, "launch_available": True,
                  "schedule_sha256": "c" * 64, "next_slot": 3}
         with patch.object(app, "_session_token", return_value="test-token"), \
+                patch.object(app.asyncio, "to_thread", side_effect=run_inline), \
                 patch.object(app, "public_status", return_value=ready), \
                 patch.object(app, "launch_next", return_value={"job_id": "2b-pilo-test", "status": "queued"}) as launch:
             result = asyncio.run(app.path_story_pilot_run_next(local_request(), payload))
         self.assertEqual(result["status"], "queued")
         launch.assert_called_once_with(ready)
         with patch.object(app, "_session_token", return_value="test-token"), \
+                patch.object(app.asyncio, "to_thread", side_effect=run_inline), \
                 patch.object(app, "launch_next") as launch:
             with self.assertRaises(HTTPException) as context:
                 asyncio.run(app.path_story_pilot_run_next(local_request(),
                             app.PilotLaunchEnvelope(launch_token="wrong")))
         self.assertEqual(context.exception.status_code, 403)
         launch.assert_not_called()
-        with patch.object(app, "public_status", side_effect=RuntimeError("image ID differs")):
+        with patch.object(app.asyncio, "to_thread", side_effect=run_inline), \
+                patch.object(app, "public_status", side_effect=RuntimeError("image ID differs")):
             unavailable = asyncio.run(app.path_story_pilot_status())
         self.assertEqual(unavailable["phase"], "integrity_error")
         self.assertFalse(unavailable["launch_available"])

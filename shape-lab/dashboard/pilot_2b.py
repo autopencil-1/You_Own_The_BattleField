@@ -16,6 +16,12 @@ from .core import JOBS, RUNS, key_configured, private_json, utc_now
 PILOT_ID = "2b-path-story-pilot-v5-zai-20261109154540-d08c59"
 
 
+def _diagnostic_overlay_active() -> bool:
+    from experiment_controller.path_story_diagnostic_2b_v1 import SCHEDULE
+
+    return SCHEDULE.is_file()
+
+
 def _reason(phase: str, credits: dict[str, Any]) -> str | None:
     if phase == "ready_for_next_run":
         return None
@@ -39,6 +45,8 @@ def public_status() -> dict[str, Any]:
     credits = current.get("credits") if isinstance(current.get("credits"), dict) else {}
     phase = str(current.get("phase") or "unknown")
     reason = _reason(phase, credits)
+    if _diagnostic_overlay_active():
+        reason = "The frozen v5 cohort has a separate diagnostic continuation; launch there"
     if reason is None and not key_configured("zai"):
         reason = "Z.AI key is not configured in the root .env"
     return {
@@ -62,6 +70,8 @@ def launch_next(current: dict[str, Any]) -> dict[str, Any]:
     """Queue one detached worker; the controller makes final admission."""
     if current.get("pilot_id") != PILOT_ID or not current.get("launch_available"):
         raise RuntimeError(str(current.get("launch_reason") or "Pilot launch is unavailable"))
+    if _diagnostic_overlay_active():
+        raise RuntimeError("The frozen v5 cohort has a separate diagnostic continuation; launch there")
     from experiment_controller.run_2a import read_key
 
     read_key("zai")

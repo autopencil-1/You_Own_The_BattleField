@@ -18,6 +18,8 @@ from .core import (RunRequest, JOBS, UI_DIST, capabilities, collector,
                    run_path, run_snapshot)
 from .jobs import launch_run
 from .pilot_2b import PILOT_ID as PATH_STORY_PILOT_ID, launch_next, public_status
+from .diagnostic_pilot_2b import _controller as diagnostic_controller, launch_next as launch_diagnostic_next, public_status as diagnostic_public_status
+from .diagnostic_stop_2b import request_stop as request_diagnostic_stop
 
 
 app = FastAPI(title="SHAPE experiment console", docs_url=None, redoc_url=None)
@@ -122,6 +124,43 @@ async def path_story_pilot_run_next(request: Request, payload: PilotLaunchEnvelo
         raise
     except Exception as exc:
         raise HTTPException(409, f"Frozen pilot launch failed: {type(exc).__name__}: {exc}") from exc
+
+
+@app.get("/api/2b/path-story-diagnostic")
+async def path_story_diagnostic_status() -> dict:
+    try:
+        return await asyncio.to_thread(diagnostic_public_status)
+    except Exception as exc:
+        return {
+            "pilot_id": diagnostic_controller().PILOT_ID,
+            "phase": "integrity_error",
+            "launch_available": False,
+            "launch_reason": f"Diagnostic integrity check failed: {type(exc).__name__}: {exc}",
+        }
+
+
+@app.post("/api/2b/path-story-diagnostic/run-next", status_code=202)
+async def path_story_diagnostic_run_next(request: Request, payload: PilotLaunchEnvelope) -> dict:
+    _guard_launch(request, payload.launch_token)
+    try:
+        current = await asyncio.to_thread(diagnostic_public_status)
+        if not current.get("launch_available"):
+            raise HTTPException(409, current.get("launch_reason") or "Diagnostic continuation is unavailable")
+        return await asyncio.to_thread(launch_diagnostic_next, current)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(409, f"Diagnostic launch failed: {type(exc).__name__}: {exc}") from exc
+
+
+@app.post("/api/2b/path-story-diagnostic/runs/{run_id}/stop", status_code=202)
+async def path_story_diagnostic_stop(request: Request, run_id: str,
+                                     payload: PilotLaunchEnvelope) -> dict:
+    _guard_launch(request, payload.launch_token)
+    try:
+        return await asyncio.to_thread(request_diagnostic_stop, run_id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.post("/api/runs", status_code=202)
