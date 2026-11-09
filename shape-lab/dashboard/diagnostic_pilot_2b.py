@@ -10,13 +10,34 @@ import sys
 from typing import Any
 
 from . import jobs
-from .core import JOBS, RUNS, key_configured, private_json, utc_now
+from .core import JOBS, RUNS, key_configured, private_json, read_json, utc_now
 
 
 def _controller():
     from experiment_controller import path_story_diagnostic_2b_v1
 
     return path_story_diagnostic_2b_v1
+
+
+def _unreconciled_provider_exposure(current: dict[str, Any]) -> str | None:
+    """Pause dashboard starts when an archived attempt lacks complete settlement.
+
+    The frozen controller estimates credits only from reported successful usage.
+    A provider 401 has no usage report, so its zero estimate cannot authorize
+    another unattended run while settlement remains incomplete.
+    """
+    attempts = current.get("invalid_attempts")
+    if not isinstance(attempts, list):
+        return "Diagnostic attempt ledger is unavailable"
+    for attempt in attempts:
+        run_id = attempt.get("run_id") if isinstance(attempt, dict) else None
+        if not isinstance(run_id, str) or not run_id.startswith("2b-path-"):
+            return "Diagnostic attempt identity differs"
+        manifest = read_json(RUNS / run_id / "attempt-manifest.json")
+        settlement = manifest.get("provider_settlement") if isinstance(manifest, dict) else None
+        if not isinstance(settlement, dict) or settlement.get("state") != "complete":
+            return f"Run {run_id} has incomplete provider settlement; reconcile credentials and cost before another attempt"
+    return None
 
 
 def public_status() -> dict[str, Any]:
@@ -36,6 +57,11 @@ def public_status() -> dict[str, Any]:
         raise RuntimeError("Diagnostic controller status differs")
     current = dict(current)
     reason = current.get("launch_reason")
+    exposure = _unreconciled_provider_exposure(current)
+    if exposure:
+        reason = exposure
+        current["controller_phase"] = current.get("phase")
+        current["phase"] = "paused_unreconciled_provider_exposure"
     if not key_configured("zai"):
         reason = "Z.AI key is not configured in the root .env"
     current["launch_available"] = bool(current.get("launch_available")) and not reason

@@ -76,6 +76,11 @@ controller then observes agent exit, settles provider usage, tears down Docker,
 and archives the attempt. A stopped attempt is infrastructure-invalid and may
 remain visible as **stopping** while those steps finish. Stop does not kill the
 controller worker or guarantee an immediate end to billing or finalization.
+If an attempt has incomplete provider settlement, the dashboard blocks another
+diagnostic launch even when the frozen controller estimates zero credits. The
+operator must investigate and reconcile that exposure under a new versioned
+record before another attempt; a key being present in `.env` is not proof that
+the provider accepted it.
 The separate
 **Engineering checks** action opens the B0 connectivity and model-free fixture
 settings. Those checks can reuse existing images or rebuild after source edits,

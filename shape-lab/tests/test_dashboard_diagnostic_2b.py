@@ -35,6 +35,7 @@ class DashboardDiagnosticTests(unittest.TestCase):
             "next_slot": 3,
             "phase": "ready_for_next_run",
             "pending_run": None,
+            "invalid_attempts": [],
             "launch_available": True,
             "launch_reason": None,
             "credits": {"may_start_new_run": True},
@@ -79,6 +80,20 @@ class DashboardDiagnosticTests(unittest.TestCase):
             self.assertNotIn("seed", request)
             spawn.assert_called_once()
             self.assertIn("dashboard.diagnostic_pilot_2b_worker", spawn.call_args.args[0])
+
+    def test_incomplete_provider_settlement_blocks_another_dashboard_launch(self) -> None:
+        run_id = "2b-path-20261110000001-a1b2c3"
+        state = {"invalid_attempts": [{"run_id": run_id, "slot": 3,
+                                       "reason": "controller_error"}]}
+        with tempfile.TemporaryDirectory() as temporary:
+            runs = Path(temporary) / "runs"
+            core.private_json(runs / run_id / "attempt-manifest.json", {
+                "provider_settlement": {"state": "incomplete", "unaccounted_request_ids": [1]},
+            })
+            with patch.object(pilot, "RUNS", runs):
+                reason = pilot._unreconciled_provider_exposure(state)
+        self.assertIn(run_id, reason)
+        self.assertIn("incomplete provider settlement", reason)
 
     def test_worker_finds_only_matching_committed_admission(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
