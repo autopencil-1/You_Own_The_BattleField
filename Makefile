@@ -6,7 +6,7 @@ ifneq ($(NVM_NODE_DIR),)
 export PATH := $(NVM_NODE_DIR):$(PATH)
 endif
 
-.PHONY: up serve down status setup images check
+.PHONY: up serve down status setup submodules images check
 
 up: images
 	@cd "$(LAB)" && "$(VENV)/bin/python" -m dashboard.service restart
@@ -38,7 +38,10 @@ setup:
 	fi
 	@cd "$(LAB)/dashboard_ui" && npm run build
 
-images: setup
+submodules:
+	@git submodule update --init --recursive -- PentestGPT
+
+images: submodules setup
 	@docker info --format '{{.ServerVersion}}' >/dev/null || { echo 'Docker daemon is unavailable' >&2; exit 1; }
 	@cd "$(LAB)" && "$(VENV)/bin/python" -c 'from dashboard.core import key_configured; assert any(key_configured(name) for name in ("zai", "ollama")), "Set ZAI_API_KEY or OLLAMA_API_KEY in the repository .env"; print("Model provider credential configured in repository .env")'
 	@cd "$(LAB)" && docker compose --profile agent -f compose.yaml build web-decoy-2a model-gateway attacker-agent

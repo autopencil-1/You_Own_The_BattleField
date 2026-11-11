@@ -1,3 +1,4 @@
 [submodule "PentestGPT"]
 	path = PentestGPT
-	url = https://github.com/GreyDGL/PentestGPT.git
+	url = https://github.com/autopencil-1/PentestGPT.git
+	branch = main
