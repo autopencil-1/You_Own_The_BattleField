@@ -399,6 +399,51 @@ class DashboardFirstSliceTests(unittest.TestCase):
                     mocked.assert_called_once_with(build=False, seed="fixture-seed", run_id=run_id,
                                                    provider="ollama")
 
+    def test_worker_runs_2a_on_checked_out_pentestgpt(self) -> None:
+        assert core is not None and worker is not None
+        from experiment_controller import run_2a
+        frozen_gate = run_2a.validate_sources
+        seen: dict[str, object] = {}
+
+        def fake_run(*args: object, **kwargs: object) -> dict[str, object]:
+            seen["sources"] = run_2a.validate_sources()
+            return {"manifest": {"termination_reason": "connectivity_observed", "error": None}}
+
+        run_id = "2a-pilo-20261026000000-d4e5f6"
+        with tempfile.TemporaryDirectory() as temporary:
+            jobs = Path(temporary) / ".dashboard-jobs"
+            request = core.RunRequest(experiment="2A", mode="pilot", arm="C2",
+                                      provider="ollama", build=False)
+            core.private_json(jobs / run_id / "request.json", request.model_dump())
+            core.private_json(jobs / run_id / "status.json", {"run_id": run_id, "status": "queued"})
+            with patch.object(core, "JOBS", jobs), patch.object(worker, "JOBS", jobs), \
+                 patch.object(run_2a, "run", side_effect=fake_run), \
+                 patch.object(worker, "checked_out_sources", return_value=("f" * 40, None)):
+                self.assertEqual(worker.main(run_id), 0)
+        self.assertEqual(seen["sources"], ("f" * 40, None))
+        self.assertIs(run_2a.validate_sources, frozen_gate)
+
+    def test_checked_out_sources_reports_any_pentestgpt_revision(self) -> None:
+        assert worker is not None
+        import subprocess
+        from experiment_controller import run_2a
+        unified = "a" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            agent = root / "PentestGPT" / "pentestgpt_agent"
+            agent.mkdir(parents=True)
+            (agent / "pyproject.toml").write_text(
+                '[tool.uv.sources]\nunified-agent = { git = "https://example.invalid/u.git", '
+                f'rev = "{unified}" }}\n', encoding="utf-8")
+            git = ["git", "-C", str(root / "PentestGPT"), "-c", "user.name=t", "-c", "user.email=t@t"]
+            subprocess.run([*git, "init", "-q"], check=True)
+            subprocess.run([*git, "add", "."], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "fixture"], check=True)
+            head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, text=True,
+                                  capture_output=True).stdout.strip()
+            with patch.object(run_2a, "REPO", root):
+                self.assertEqual(worker.checked_out_sources(), (head, unified))
+
     def test_provider_credential_presence_is_independent(self) -> None:
         assert core is not None
         with tempfile.TemporaryDirectory() as temporary:
