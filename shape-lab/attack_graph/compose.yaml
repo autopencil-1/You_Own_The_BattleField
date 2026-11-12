@@ -20,8 +20,16 @@ services:
         NEO4J_USER: neo4j
         NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env}
         GRAPH_SCAN_ID: bc1f19bf-7806-405d-a51d-85fce50bb5e6
-      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
-      OLLAMA_CHAT_URL: ${OLLAMA_CHAT_URL:-https://ollama.com/v1/chat/completions}
+      # Threat-model generation uses the Z.ai GLM Coding Plan DEV key. The
+      # production ZAI_API_KEY is deliberately NOT referenced here: it is consumed
+      # by another service. Keep this bound to ZAI_API_KEY_dev from the root .env.
+      ZAI_API_KEY_dev: ${ZAI_API_KEY_dev:-}
+      ZAI_CHAT_URL: ${ZAI_CHAT_URL:-https://api.z.ai/api/coding/paas/v4/chat/completions}
+      ZAI_MODEL: ${ZAI_MODEL:-glm-5.3}
+      # GLM-5.3 thinking is always on and shares the completion budget, so keep
+      # max_tokens generous; reasoning_effort (low|high|max) trims the trace.
+      ZAI_MAX_TOKENS: ${ZAI_MAX_TOKENS:-65536}
+      ZAI_REASONING_EFFORT: ${ZAI_REASONING_EFFORT:-low}
       THREAT_MODEL_EXTERNAL_EXPORT_ALLOWED: ${THREAT_MODEL_EXTERNAL_EXPORT_ALLOWED:-false}
     volumes:
       - ../attack_graph_ui/dist:/app/ui:ro

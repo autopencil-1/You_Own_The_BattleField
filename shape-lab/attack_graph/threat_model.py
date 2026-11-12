@@ -17,9 +17,12 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 
-MODEL = "glm-5.3"
-PROVIDER = "ollama_cloud"
-DEFAULT_CHAT_URL = "https://ollama.com/v1/chat/completions"
+# Threat-model generation runs on the Z.ai GLM Coding Plan (OpenAI-compatible).
+# Overridable with ZAI_MODEL; glm-5.3 is the current coding-plan default
+# (glm-5.3-flash is a cheaper, higher-quota alternative on the same plan).
+MODEL = os.environ.get("ZAI_MODEL", "glm-5.3").strip() or "glm-5.3"
+PROVIDER = "zai_coding"
+DEFAULT_CHAT_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
 MAX_DOCUMENTS = 44
 MAX_HYPOTHESES = 18
 CAPABILITY_KINDS = {"network_reach", "route_access", "public_read", "role_session", "read", "write",
@@ -203,33 +206,48 @@ def make_followup_prompt(context: dict, first: list[dict]) -> list[dict]:
 def call_model(messages: list[dict]) -> dict:
     if os.environ.get("THREAT_MODEL_EXTERNAL_EXPORT_ALLOWED", "false").lower() != "true":
         raise RuntimeError("External evidence export is disabled pending explicit approval")
-    key = os.environ.get("OLLAMA_API_KEY", "").strip()
+    # Deliberately the DEV coding-plan key: the production ZAI_API_KEY is reserved
+    # for another service and must not be consumed by this stack.
+    key = os.environ.get("ZAI_API_KEY_dev", "").strip()
     if not key:
-        raise RuntimeError("OLLAMA_API_KEY is not configured for the graph API")
-    url = os.environ.get("OLLAMA_CHAT_URL", DEFAULT_CHAT_URL)
+        raise RuntimeError("ZAI_API_KEY_dev is not configured for the graph API")
+    url = os.environ.get("ZAI_CHAT_URL", DEFAULT_CHAT_URL)
     parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.netloc != "ollama.com" or parsed.path != "/v1/chat/completions":
-        raise RuntimeError("OLLAMA_CHAT_URL must be https://ollama.com/v1/chat/completions")
-    # Ollama Cloud does not currently support the structured-output format field.
-    body = json.dumps({"model": MODEL, "messages": messages, "stream": False,
-                       "reasoning_effort": "low", "temperature": 0.2,
-                       "max_tokens": 10000}).encode()
+    if parsed.scheme != "https" or parsed.netloc != "api.z.ai" or not parsed.path.endswith("/chat/completions"):
+        raise RuntimeError("ZAI_CHAT_URL must be an https://api.z.ai/.../chat/completions endpoint")
+    # GLM-5.3 keeps "thinking" always on, and the reasoning trace shares the
+    # completion budget with the answer, so max_tokens must be generous or the
+    # JSON answer is truncated (finish_reason "length"). reasoning_effort (low|
+    # high|max) trims the trace; "low" matches this task's JSON-only intent.
+    try:
+        max_tokens = max(1024, int(os.environ.get("ZAI_MAX_TOKENS", "65536")))
+    except ValueError:
+        max_tokens = 65536
+    payload = {"model": MODEL, "messages": messages, "stream": False,
+               "temperature": 0.2, "max_tokens": max_tokens}
+    effort = os.environ.get("ZAI_REASONING_EFFORT", "low").strip().lower()
+    if effort in ("low", "high", "max"):
+        payload["reasoning_effort"] = effort
+    body = json.dumps(payload).encode()
     req = request.Request(url, data=body, method="POST", headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
         with request.urlopen(req, timeout=180) as response:
-            raw = response.read(400_000)
+            raw = response.read(2_000_000)
     except error.HTTPError as exc:
-        raise RuntimeError(f"Ollama request failed with HTTP {exc.code}") from None
+        raise RuntimeError(f"Z.ai request failed with HTTP {exc.code}") from None
     except error.URLError as exc:
-        raise RuntimeError(f"Ollama request failed: {exc.reason}") from None
+        raise RuntimeError(f"Z.ai request failed: {exc.reason}") from None
     envelope = json.loads(raw)
     choice = envelope["choices"][0]
     if choice.get("finish_reason") != "stop":
-        raise RuntimeError(f"Ollama response incomplete: {choice.get('finish_reason')}")
+        usage = envelope.get("usage", {})
+        raise RuntimeError(
+            f"Z.ai response incomplete: {choice.get('finish_reason')} (usage={usage}); "
+            f"the output hit max_tokens={max_tokens} — raise ZAI_MAX_TOKENS or lower ZAI_REASONING_EFFORT")
     content = choice.get("message", {}).get("content")
     if not isinstance(content, str):
-        raise RuntimeError("Ollama response has no text content")
+        raise RuntimeError("Z.ai response has no text content")
     return parse_model_json(content)
 
 
@@ -237,13 +255,13 @@ def parse_model_json(content: str) -> dict:
     """Accept a JSON object within a text reply, but never execute or trust prose."""
     start = content.find("{")
     if start < 0:
-        raise RuntimeError(f"Ollama response has no JSON object (characters={len(content)})")
+        raise RuntimeError(f"Model response has no JSON object (characters={len(content)})")
     try:
         value, _ = json.JSONDecoder().raw_decode(content[start:])
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Ollama response contains malformed JSON (characters={len(content)})") from exc
+        raise RuntimeError(f"Model response contains malformed JSON (characters={len(content)})") from exc
     if not isinstance(value, dict):
-        raise RuntimeError("Ollama response JSON is not an object")
+        raise RuntimeError("Model response JSON is not an object")
     return value
 
 

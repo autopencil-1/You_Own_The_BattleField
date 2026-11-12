@@ -15,7 +15,7 @@ from neo4j import READ_ACCESS
 from pydantic import BaseModel, Field
 
 from db import connect, scan_id
-from threat_model import example_result, generate_result, make_prompt, retrieve
+from threat_model import MODEL, PROVIDER, example_result, generate_result, make_prompt, retrieve
 
 
 UI_DIR = Path("/app/ui")
@@ -109,20 +109,20 @@ def threat_model_context(request: Request, body: ThreatModelRequest):
         context = retrieve(overview_payload(request), body.goal, body.target_asset_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {**context, "model_configured": bool(os.environ.get("OLLAMA_API_KEY")),
+    return {**context, "model_configured": bool(os.environ.get("ZAI_API_KEY_dev")),
             "generation_enabled": model_generation_enabled(),
             "prompt_messages": make_prompt(context)}
 
 
 def model_generation_enabled() -> bool:
-    return bool(os.environ.get("OLLAMA_API_KEY")) and os.environ.get(
+    return bool(os.environ.get("ZAI_API_KEY_dev")) and os.environ.get(
         "THREAT_MODEL_EXTERNAL_EXPORT_ALLOWED", "false").lower() == "true"
 
 
 @app.get("/api/threat-model/status")
 def threat_model_status():
-    return {"model": "glm-5.3", "provider": "ollama_cloud",
-            "generation_enabled": model_generation_enabled(), "export_destination": "ollama.com"}
+    return {"model": MODEL, "provider": PROVIDER,
+            "generation_enabled": model_generation_enabled(), "export_destination": "api.z.ai"}
 
 
 @app.get("/api/threat-model/example")

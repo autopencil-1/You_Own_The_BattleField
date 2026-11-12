@@ -340,6 +340,15 @@ function Metric({ value, label }: { value: string; label: string }) {
   return <div className="metric"><strong>{value}</strong><span>{label}</span></div>
 }
 
+function providerLabel(provider: string): string {
+  if (provider === 'zai_coding') return 'Z.ai GLM Coding Plan'
+  if (provider === 'ollama_cloud') return 'Ollama Cloud'
+  if (provider === 'offline') return 'offline'
+  return provider || 'the model provider'
+}
+
+type ThreatStatus = { model: string; provider: string; generation_enabled: boolean; export_destination: string }
+
 function ThreatModelStudio({ snapshot, result, onResult, activePathIndex, onPathSelect }: {
   snapshot: Snapshot
   result: ThreatResult | null
@@ -353,6 +362,7 @@ function ThreatModelStudio({ snapshot, result, onResult, activePathIndex, onPath
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [generationEnabled, setGenerationEnabled] = useState(false)
+  const [status, setStatus] = useState<ThreatStatus | null>(null)
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}api/threat-model/latest`, { cache: 'no-store' })
@@ -361,9 +371,13 @@ function ThreatModelStudio({ snapshot, result, onResult, activePathIndex, onPath
       .catch(() => {})
     fetch(`${import.meta.env.BASE_URL}api/threat-model/status`, { cache: 'no-store' })
       .then(response => response.ok ? response.json() : null)
-      .then(data => setGenerationEnabled(Boolean(data?.generation_enabled)))
+      .then(data => { if (data) { setStatus(data as ThreatStatus); setGenerationEnabled(Boolean(data.generation_enabled)) } })
       .catch(() => {})
   }, [onResult])
+
+  const modelName = status?.model || 'GLM-5.3'
+  const providerName = providerLabel(status?.provider || 'zai_coding')
+  const exportDestination = status?.export_destination || 'api.z.ai'
 
   async function run(mode: 'context' | 'generate') {
     setBusy(true)
@@ -396,8 +410,8 @@ function ThreatModelStudio({ snapshot, result, onResult, activePathIndex, onPath
 
   return <section className="threat-studio" aria-label="LLM threat model">
     <div className="threat-head"><div><p className="eyebrow">EVIDENCE → HYPOTHESES → ROUTES</p><h2>Threat model generator</h2>
-      <p>GLM-5.3 proposes testable weakness hypotheses. A local planner combines them with known routing and checks each prerequisite.</p></div>
-      <span className="model-badge">GLM-5.3 on Ollama Cloud</span></div>
+      <p>{modelName} proposes testable weakness hypotheses. A local planner combines them with known routing and checks each prerequisite.</p></div>
+      <span className="model-badge">{modelName} on {providerName}</span></div>
     <div className="threat-controls">
       <label>Modeling goal<input value={goal} maxLength={500} onChange={event => setGoal(event.target.value)} /></label>
       <label>Destination asset<select value={target} onChange={event => setTarget(event.target.value)}>
@@ -408,15 +422,15 @@ function ThreatModelStudio({ snapshot, result, onResult, activePathIndex, onPath
         <button type="button" disabled={busy} onClick={previewExample}>Preview local example</button>
         <button type="button" className="primary" disabled={busy || goal.length < 8 || !generationEnabled} onClick={() => run('generate')}>{busy ? 'Working…' : 'Generate hypotheses and routes'}</button></div>
     </div>
-    {!generationEnabled && <p className="threat-pending">Live generation is disabled until the Ollama credential and evidence-export gate are configured. Retrieval and local validation remain available.</p>}
-    {generationEnabled && <p className="threat-pending">Generating sends the selected crawl and CMDB evidence records to Ollama Cloud.</p>}
+    {!generationEnabled && <p className="threat-pending">Live generation is disabled until the {providerName} credential and evidence-export gate are configured. Retrieval and local validation remain available.</p>}
+    {generationEnabled && <p className="threat-pending">Generating sends the selected crawl and CMDB evidence records to {providerName} ({exportDestination}).</p>}
     {error && <p className="threat-error" role="alert">{error}</p>}
     {context && <div className="threat-context"><h3>Retrieved context</h3>
       <p>{context.documents.length} of {context.corpus_size} evidence records selected · {context.initial_capabilities.length} starting capabilities · generation {context.generation_enabled ? 'enabled' : 'disabled'}</p>
       <div className="evidence-chips">{context.documents.map(doc => <span key={doc.id} title={doc.text}>{doc.id} <small>{evidenceNames[doc.evidence_state]}</small></span>)}</div>
       <details><summary>Starting capabilities</summary><ul>{context.initial_capabilities.map(capability => <li key={capability}>{capability}</li>)}</ul></details>
     </div>}
-    {result && <div className="threat-result"><div className="threat-result-head"><h3>Vulnerability hypotheses</h3><span>{result.hypotheses?.length || 0} hypotheses · {result.paths.length} routes · {result.model}{result.example ? '' : ' on Ollama Cloud'}</span></div>
+    {result && <div className="threat-result"><div className="threat-result-head"><h3>Vulnerability hypotheses</h3><span>{result.hypotheses?.length || 0} hypotheses · {result.paths.length} routes · {result.model}{result.example ? '' : ` on ${providerLabel(result.provider)}`}</span></div>
       {!result.example && (result.planner_version || 0) < 3 && <p className="threat-example">This saved run uses the older action-first planner. Select “Preview local example” to inspect the new hypothesis-first graph.</p>}
       {result.example && <p className="threat-example">Offline illustration from the supplied architecture. These ten weaknesses and eighteen chains are test scenarios, not model output or verified findings. This preview is not saved.</p>}
       {result.revalidated_from && <p className="small-note">Locally revalidated from saved GLM run {result.revalidated_from}; no new model call.</p>}
